@@ -1,4 +1,3 @@
-/Users/shivambangwal/.zprofile:2: no such file or directory: /usr/local/bin/brew
 # YouTube Channel Downloader
 
 This repository contains the local app and Hostinger VPS web app in separate folders:
