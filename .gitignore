@@ -1,0 +1,14 @@
+# Local bundled toolchain is large and can be installed on first run.
+youtube-channel-downloader/.runtime/
+
+# User downloads and local machine metadata.
+youtube-channel-downloader/downloads/
+**/.DS_Store
+
+# Python cache and environment files.
+**/__pycache__/
+*.py[cod]
+.env
+**/.env
+**/.venv/
+**/venv/

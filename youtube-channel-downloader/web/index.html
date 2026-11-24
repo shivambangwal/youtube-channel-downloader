@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Channel Downloader</title>
+  <style>
+    :root {
+      --bg: #0b0e14; --panel: #111620; --panel-2: #151c28; --line: #252e3b;
+      --ink: #f3f6fb; --muted: #9aa6b8; --soft: #6f7d91; --accent: #ff1f1f;
+      --accent-ink: #ffffff; --red: #ff7777; --blue: #97baff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(ellipse at 88% -10%, #1b2933 0, transparent 36%), var(--bg); color: var(--ink); font: 15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 60px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 44px; }
+    .brand { display: flex; align-items: center; gap: 11px; font-weight: 650; letter-spacing: -.025em; }
+    .local-badge { border: 1px solid var(--line); color: var(--muted); padding: 6px 10px; border-radius: 99px; font-size: 12px; display: flex; align-items: center; gap: 7px; }
+    .local-badge .dot { background: #748094; box-shadow: none; }
+    .local-badge.connected { color: #a5f2c4; border-color: #28573d; background: #101b16; }
+    .local-badge.connected .dot { background: #39d98a; box-shadow: 0 0 12px #39d98a88; }
+    .local-badge.disconnected { color: #ff9a9a; border-color: #613036; }
+    .local-badge.disconnected .dot { background: #ff6464; box-shadow: 0 0 12px #ff646488; }
+    .dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 12px #ff1f1f88; }
+    .intro { max-width: 650px; margin-bottom: 29px; }
+    .eyebrow { color: var(--accent); text-transform: uppercase; font-size: 11px; font-weight: 750; letter-spacing: .15em; margin-bottom: 12px; }
+    h1 { font-size: clamp(36px, 5.5vw, 58px); letter-spacing: -.055em; line-height: 1.06; margin: 0 0 16px; font-weight: 650; }
+    .intro p { color: var(--muted); font-size: 16px; margin: 0; max-width: 590px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 18px; align-items: start; }
+    .card { background: linear-gradient(145deg, #141a24, #10151e); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 18px 60px #0003; }
+    .form-card { padding: 25px; }
+    .card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 23px; }
+    h2 { font-size: 17px; margin: 0; letter-spacing: -.02em; }
+    .sub { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+    .step { font-size: 11px; color: var(--soft); border: 1px solid var(--line); border-radius: 99px; padding: 4px 8px; white-space: nowrap; }
+    label { display: block; color: #dce3ed; font-weight: 580; font-size: 13px; margin: 0 0 8px; }
+    .url-wrap { position: relative; }
+    .url-icon { position: absolute; top: 14px; left: 14px; color: #7e8ca0; width: 17px; }
+    input[type=url] { width: 100%; color: var(--ink); background: #0c1119; border: 1px solid #303a49; border-radius: 11px; padding: 13px 14px 13px 42px; outline: none; transition: border-color .15s, box-shadow .15s; }
+    input[type=url]:focus { border-color: #ff4b4b; box-shadow: 0 0 0 3px #ff1f1f22; }
+    input::placeholder { color: #677386; }
+    .helper { color: var(--soft); font-size: 12px; margin-top: 8px; }
+    .crop-control { margin-top: 18px; }
+    .crop-select { width: 100%; color: var(--ink); background: #0c1119; border: 1px solid #303a49; border-radius: 11px; padding: 12px 14px; outline: none; }
+    .crop-select:focus { border-color: #ff4b4b; box-shadow: 0 0 0 3px #ff1f1f22; }
+    .label-row { display: flex; justify-content: space-between; align-items: center; margin: 22px 0 9px; }
+    .label-row label { margin: 0; }
+    .quality-chip { color: #fff; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+    .quality-chip svg { width: 13px; }
+    .segmented { padding: 4px; background: #0c1119; border: 1px solid #293241; border-radius: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    .segment { border: 1px solid transparent; background: transparent; border-radius: 9px; color: var(--muted); padding: 10px 12px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: .15s; }
+    .segment svg { width: 16px; height: 16px; }
+    .segment.active { background: #35191c; border-color: #723137; color: #ffc4c8; box-shadow: inset 0 0 0 1px #522329; }
+    .actions { display: flex; gap: 10px; margin-top: 20px; }
+    .primary { border: 0; color: var(--accent-ink); background: var(--accent); border-radius: 10px; padding: 12px 17px; font-weight: 720; display: flex; align-items: center; justify-content: center; gap: 9px; transition: filter .15s, transform .15s; }
+    .primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
+    .primary:disabled { cursor: wait; opacity: .62; transform: none; }
+    .primary svg { width: 17px; }
+    .secondary { color: #d4dce7; border: 1px solid #354050; background: #151c27; border-radius: 10px; padding: 11px 14px; font-weight: 580; }
+    .secondary:hover { border-color: #536177; }
+    .notice { display: flex; gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #242c38; color: var(--soft); font-size: 11px; }
+    .notice svg { width: 15px; flex: none; margin-top: 1px; color: #b7c4d5; }
+    .side-card { padding: 23px; }
+    .side-title { display: flex; gap: 10px; align-items: center; margin-bottom: 17px; }
+    .side-icon { width: 32px; height: 32px; display: grid; place-items: center; background: #202b35; color: #bce4a2; border-radius: 9px; }
+    .side-icon svg { width: 16px; }
+    .side-title h2 { font-size: 15px; }
+    .spec { border-top: 1px solid #242c38; padding: 12px 0; display: flex; gap: 12px; align-items: flex-start; }
+    .spec:first-of-type { border-top: 0; }
+    .check { color: var(--accent); font-size: 13px; }
+    .spec strong { display: block; font-size: 12px; font-weight: 620; }
+    .spec span { display: block; color: var(--soft); font-size: 11px; margin-top: 2px; }
+    .deps { display: flex; align-items: center; gap: 7px; padding-top: 13px; margin-top: 3px; border-top: 1px solid #242c38; color: var(--soft); font-size: 11px; }
+    .dep-pill { border: 1px solid #313b49; color: #bcc6d4; padding: 3px 7px; border-radius: 99px; }
+    .dep-pill.ready { color: #d5ffc2; border-color: #40563a; background: #21301e; }
+    .dep-pill.missing { color: #ffb8b8; border-color: #583b3b; }
+    .results { margin-top: 20px; padding: 22px; display: none; }
+    .results.visible { display: block; }
+    .results-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .results-head h2 { margin: 0; }
+    .result-count { color: var(--muted); font-size: 12px; }
+    .video-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .video { min-width: 0; background: #0c1118; border: 1px solid #252e3b; border-radius: 11px; overflow: hidden; }
+    .thumb { aspect-ratio: 16 / 9; position: relative; background: #1b2531; }
+    .video-grid[data-framing="4:5"] .thumb { aspect-ratio: 4 / 5; }
+    .video-grid[data-framing="1:1"] .thumb { aspect-ratio: 1 / 1; }
+    .video-grid[data-framing="5:4"] .thumb { aspect-ratio: 5 / 4; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+    .duration { position: absolute; right: 6px; bottom: 6px; background: #080a0edb; color: white; font-size: 10px; padding: 2px 5px; border-radius: 4px; }
+    .video-meta { padding: 9px 10px 11px; }
+    .video-title { font-size: 11px; line-height: 1.4; height: 31px; overflow: hidden; color: #e6ebf2; }
+    .video-date { font-size: 10px; color: var(--soft); margin-top: 5px; }
+    .job-card { margin-top: 20px; padding: 22px; display: none; }
+    .job-card.visible { display: block; }
+    .job-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+    .job-head h2 { font-size: 16px; }
+    .cancel-job { padding: 7px 10px; font-size: 11px; white-space: nowrap; }
+    .cancel-job[hidden] { display: none; }
+    .job-status { display: inline-flex; align-items: center; gap: 7px; color: #c4d2e1; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .status-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .status-indicator.error { background: var(--red); }
+    .status-indicator.complete { background: var(--blue); }
+    .progress-track { height: 5px; border-radius: 9px; background: #232d3b; margin: 17px 0 9px; overflow: hidden; }
+    .progress-fill { width: 0; height: 100%; background: var(--accent); border-radius: inherit; transition: width .35s ease; }
+    .job-caption { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 14px; }
+    .job-message { color: #e1e7ef; font-size: 12px; margin-top: 14px; }
+    .job-path { color: var(--soft); font-size: 11px; word-break: break-all; margin-top: 5px; }
+    .download-files { border-top: 1px solid #242c38; margin-top: 15px; padding-top: 13px; }
+    .download-files[hidden] { display: none; }
+    .download-files h3 { color: #dce3ed; font-size: 12px; margin: 0 0 9px; }
+    .file-list { display: grid; gap: 7px; max-height: 250px; overflow: auto; }
+    .file-download { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: #0c1118; border: 1px solid #252e3b; border-radius: 8px; padding: 9px 11px; color: #ffc4c8; font-size: 11px; text-decoration: none; }
+    .file-download:hover { border-color: #536177; }
+    .file-download span { color: var(--soft); white-space: nowrap; }
+    details { margin-top: 14px; border-top: 1px solid #242c38; padding-top: 11px; }
+    summary { color: var(--muted); font-size: 11px; cursor: pointer; }
+    .log { max-height: 160px; overflow: auto; padding: 10px; margin-top: 9px; border-radius: 8px; background: #090d13; color: #8d9aab; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .toast { position: fixed; left: 50%; bottom: 25px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; background: #26323d; border: 1px solid #3a4858; color: white; border-radius: 10px; padding: 11px 15px; font-size: 12px; box-shadow: 0 12px 30px #0008; transition: .2s; z-index: 5; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .spinner { width: 15px; height: 15px; border: 2px solid #203018; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } .side-card { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; } .side-title { grid-column: 1 / -1; } .deps { grid-column: 1 / -1; } .video-grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 560px) { .shell { width: calc(100% - 26px); padding-top: 20px; } .topbar { margin-bottom: 32px; } .intro { margin-bottom: 23px; } .form-card, .side-card, .results, .job-card { padding: 18px; } .local-badge { font-size: 10px; } .video-grid { grid-template-columns: repeat(2, 1fr); } .actions { flex-direction: column; } .actions button { width: 100%; } .side-card { display: block; } .spec { padding: 10px 0; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span>Channel Downloader</span>
+      </div>
+      <div class="local-badge" id="connection-badge" title="Checking app connection"><i class="dot"></i><span>Private downloader</span></div>
+    </header>
+
+    <section class="intro">
+      <div class="eyebrow">Your channel, your library</div>
+      <p>Choose Videos or Shorts, preview the channel, and save MP4 files at the highest available resolution, including 4K when offered.</p>
+    </section>
+
+    <section class="layout">
+      <div class="card form-card">
+        <div class="card-heading">
+          <div><h2>Choose what to download</h2><p class="sub">Paste a channel link or one video/Shorts link.</p></div>
+          <span class="step">STEP 01</span>
+        </div>
+        <form id="download-form">
+          <label for="channel-url">YouTube channel, video, or Shorts URL</label>
+          <div class="url-wrap">
+            <svg class="url-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10.5 13.5a4.25 4.25 0 0 0 6.01 0l2-2a4.25 4.25 0 0 0-6.01-6.01l-1.15 1.15M13.5 10.5a4.25 4.25 0 0 0-6.01 0l-2 2a4.25 4.25 0 0 0 6.01 6.01l1.15-1.15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <input id="channel-url" type="text" inputmode="url" placeholder="Channel link or youtube.com/watch?v=…" autocomplete="url" required>
+          </div>
+          <div class="helper">A channel link uses the selected Videos or Shorts tab. For one watch, youtu.be, or Shorts link, click Download selection to save only that item; preview is optional.</div>
+
+          <div class="label-row"><label>Content type</label><span class="quality-chip"><svg viewBox="0 0 20 20" fill="none"><path d="m10 2 1.9 5.4L17 9l-5.1 1.6L10 16l-1.9-5.4L3 9l5.1-1.6L10 2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="m15.5 13 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" fill="currentColor"/></svg> Highest available · MP4</span></div>
+          <div class="segmented" role="group" aria-label="Content type">
+            <button class="segment active" type="button" data-type="videos" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5.5" width="17" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor"/></svg>Videos</button>
+            <button class="segment" type="button" data-type="shorts" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none"><path d="M14.8 3.4a3.1 3.1 0 0 1 3.1 5.4l-1.8 1 1.8 1a3.1 3.1 0 1 1-3.1 5.4l-5.6-3.2-1.8 1a3.1 3.1 0 1 1-3.1-5.4l1.8-1-1.8-1a3.1 3.1 0 1 1 3.1-5.4l5.6 3.2 1.8-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor"/></svg>Shorts</button>
+          </div>
+
+          <div class="crop-control">
+            <label for="crop-ratio">Video framing</label>
+            <select class="crop-select" id="crop-ratio">
+              <option value="original">Original (no crop)</option>
+              <option value="4:5">4:5 portrait crop</option>
+              <option value="1:1">1:1 square crop</option>
+              <option value="5:4">5:4 landscape crop</option>
+            </select>
+            <div class="helper">Paste a link and choose Preview selection to see it in this shape. Crops are centered; cropped videos are re-encoded and may take longer.</div>
+          </div>
+
+          <div class="actions">
+            <button class="primary" id="preview-button" type="submit"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Preview selection</button>
+            <button class="secondary" id="download-button" type="button" disabled>Download selection</button>
+          </div>
+        </form>
+        <div class="notice"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 3.8 7v5.3c0 4.6 3.5 7.8 8.2 8.7 4.7-.9 8.2-4.1 8.2-8.7V7L12 3Z" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v4m0 3h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Use this tool only for videos you own or have permission to download. Follow YouTube’s terms and copyright rules.</span></div>
+      </div>
+
+      <aside class="card side-card">
+        <div class="side-title"><div class="side-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h2>One link or a full collection</h2><p class="sub">Choose exactly what to save.</p></div></div>
+        <div class="spec"><b class="check">✓</b><div><strong>MP4 up to 4K</strong><span>Highest available source resolution, with optional 4:5 portrait, 1:1 square, or 5:4 landscape crops.</span></div></div>
+        <div class="spec"><b class="check">✓</b><div><strong>Single link or channel tab</strong><span>Save one video or Short, or download a channel’s complete Videos or Shorts tab.</span></div></div>
+        <div class="spec"><b class="check">✓</b><div><strong>Resume friendly</strong><span>Completed files are kept and skipped next time.</span></div></div>
+        <div class="deps"><span>Built-in tools</span><span class="dep-pill" id="ytdlp-pill">yt-dlp</span><span class="dep-pill" id="ffmpeg-pill">ffmpeg</span><span class="dep-pill" id="deno-pill">Deno</span></div>
+      </aside>
+    </section>
+
+    <section class="card results" id="results">
+      <div class="results-head"><div><h2 id="results-title">Channel preview</h2><p class="sub" id="results-sub">Loading videos…</p></div><span class="result-count" id="result-count"></span></div>
+      <div class="video-grid" id="video-grid"></div>
+    </section>
+
+    <section class="card job-card" id="job-card">
+      <div class="job-head"><div><h2 id="job-title">Download in progress</h2><p class="sub" id="job-sub">Files are saved in your Mac Downloads folder. Download them to your device below.</p></div><button class="secondary cancel-job" id="cancel-job-button" type="button" hidden>Stop download</button><span class="job-status"><i id="status-indicator" class="status-indicator"></i><span id="job-status">Starting</span></span></div>
+      <div class="progress-track" id="progress-track" role="progressbar" aria-label="Current video download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="job-caption"><span id="job-current">Connecting…</span><span id="job-percent">0%</span></div>
+      <div class="job-message" id="job-message"></div><div class="job-path" id="job-path"></div>
+      <div class="download-files" id="job-files" hidden><h3>Completed files — select a file to save it to your device</h3><div class="file-list" id="job-file-list"></div></div>
+      <details><summary>Download log</summary><div class="log" id="job-log"></div></details>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const form = document.querySelector('#download-form');
+    const urlInput = document.querySelector('#channel-url');
+    const cropRatioInput = document.querySelector('#crop-ratio');
+    const previewButton = document.querySelector('#preview-button');
+    const downloadButton = document.querySelector('#download-button');
+    const cancelJobButton = document.querySelector('#cancel-job-button');
+    const results = document.querySelector('#results');
+    const grid = document.querySelector('#video-grid');
+    let mediaType = 'videos';
+    let previewReady = false;
+    let previewIsSingle = false;
+    let previewMediaType = 'videos';
+    let currentJob = sessionStorage.getItem('channel-downloader-job');
+    let pollTimer = null;
+
+    function detectSingleYoutubeType(rawUrl) {
+      try {
+        const value = rawUrl.trim();
+        if (!value) return null;
+        const url = new URL(value.includes('://') ? value : `https://${value}`);
+        const host = url.hostname.toLowerCase().replace(/\.$/, '');
+        const parts = url.pathname.split('/').filter(Boolean);
+        let id = '', type = 'videos';
+        if (host === 'youtu.be' || host === 'www.youtu.be') id = parts[0] || '';
+        else if (['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(host)) {
+          if (parts[0] === 'watch') id = url.searchParams.get('v') || '';
+          else if (['shorts', 'live', 'embed'].includes(parts[0]) && parts[1]) {
+            id = parts[1]; type = parts[0] === 'shorts' ? 'shorts' : 'videos';
+          }
+        }
+        return /^[A-Za-z0-9_-]{11}$/.test(id) ? type : null;
+      } catch (_) { return null; }
+    }
+    function activateMediaType(type) {
+      mediaType = type;
+      document.querySelectorAll('.segment').forEach(button => {
+        const active = button.dataset.type === type;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+    urlInput.addEventListener('input', () => {
+      const singleType = detectSingleYoutubeType(urlInput.value);
+      previewReady = false;
+      previewIsSingle = Boolean(singleType);
+      previewMediaType = singleType || mediaType;
+      downloadButton.disabled = !singleType;
+      results.classList.remove('visible');
+      if (singleType) activateMediaType(singleType);
+    });
+
+    function toast(message) {
+      const el = document.querySelector('#toast');
+      el.textContent = message;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 3200);
+    }
+    function formatSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ['KB', 'MB', 'GB', 'TB'];
+      let value = bytes / 1024, unit = 0;
+      while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+      return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+    }
+    function renderJobFiles(files) {
+      const box = document.querySelector('#job-files');
+      const list = document.querySelector('#job-file-list');
+      list.replaceChildren();
+      for (const file of files) {
+        const link = document.createElement('a');
+        link.className = 'file-download'; link.href = file.url; link.download = file.name;
+        const name = document.createElement('strong'); name.textContent = file.name;
+        const size = document.createElement('span'); size.textContent = formatSize(file.size);
+        link.append(name, size); list.append(link);
+      }
+      box.hidden = files.length === 0;
+    }
+    async function api(path, body) {
+      const response = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+      return data;
+    }
+    function setPreviewLoading(loading) {
+      previewButton.disabled = loading;
+      previewButton.innerHTML = loading ? '<span class="spinner"></span> Loading selection…' : '<svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16m-6-6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg> Preview selection';
+    }
+    function durationText(seconds) {
+      if (seconds == null) return '';
+      const n = Math.max(0, Math.floor(seconds));
+      const h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), s = n % 60;
+      return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+    }
+    function prettyDate(value) {
+      if (!value || !/^\d{8}$/.test(value)) return '';
+      return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+    }
+    function updatePreviewFraming() {
+      const framing = cropRatioInput.value || 'original';
+      grid.dataset.framing = framing;
+      const aspect = { original: '16 / 9', '4:5': '4 / 5', '1:1': '1 / 1', '5:4': '5 / 4' }[framing] || '16 / 9';
+      grid.querySelectorAll('.thumb').forEach(thumb => { thumb.style.aspectRatio = aspect; });
+      if (!results.classList.contains('visible')) return;
+      const base = previewIsSingle
+        ? `One ${previewMediaType === 'shorts' ? 'Short' : 'video'} selected. Only this item will download.`
+        : `Preview of ${previewMediaType === 'shorts' ? 'Shorts' : 'videos'} on this channel`;
+      const note = framing === 'original' ? '' : ` · centered ${framing} crop preview`;
+      document.querySelector('#results-sub').textContent = `${base}${note}`;
+    }
+    cropRatioInput.addEventListener('change', updatePreviewFraming);
+    function renderVideos(data) {
+      grid.replaceChildren();
+      for (const video of data.videos) {
+        const card = document.createElement('article'); card.className = 'video';
+        const thumb = document.createElement('div'); thumb.className = 'thumb';
+        if (video.thumbnail) { const img = document.createElement('img'); img.src = video.thumbnail; img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; thumb.append(img); }
+        const duration = durationText(video.duration);
+        if (duration) { const badge = document.createElement('span'); badge.className = 'duration'; badge.textContent = duration; thumb.append(badge); }
+        const meta = document.createElement('div'); meta.className = 'video-meta';
+        const title = document.createElement('div'); title.className = 'video-title'; title.textContent = video.title; title.title = video.title;
+        const date = document.createElement('div'); date.className = 'video-date'; date.textContent = prettyDate(video.upload_date) || 'YouTube video';
+        meta.append(title, date); card.append(thumb, meta); grid.append(card);
+      }
+      const kind = data.media_type === 'shorts' ? 'Shorts' : 'videos';
+      document.querySelector('#results-title').textContent = data.channel;
+      previewIsSingle = Boolean(data.single);
+      previewMediaType = data.media_type || mediaType;
+      if (previewIsSingle) {
+        activateMediaType(previewMediaType);
+      }
+      document.querySelector('#result-count').textContent = data.single ? '1 item' : `${data.count}${data.truncated ? '+' : ''} items`;
+      results.classList.add('visible');
+      updatePreviewFraming();
+      downloadButton.disabled = data.count === 0;
+      previewReady = data.count > 0;
+      if (!data.count) toast(`No ${kind} found on this channel.`);
+      if (data.truncated) toast('Showing the first 200 items. Download includes the full channel tab.');
+    }
+    document.querySelectorAll('.segment').forEach(button => button.addEventListener('click', () => {
+      const singleType = detectSingleYoutubeType(urlInput.value);
+      activateMediaType(singleType || button.dataset.type);
+      previewReady = false; previewIsSingle = Boolean(singleType); previewMediaType = singleType || mediaType;
+      downloadButton.disabled = !singleType;
+      results.classList.remove('visible');
+    }));
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!urlInput.value.trim()) return;
+      previewReady = false; downloadButton.disabled = true; results.classList.add('visible');
+      document.querySelector('#results-title').textContent = 'Channel preview';
+      document.querySelector('#results-sub').textContent = 'Reading selection…';
+      document.querySelector('#result-count').textContent = '';
+      grid.replaceChildren(); setPreviewLoading(true);
+      try { renderVideos(await api('/api/preview', { url: urlInput.value, media_type: mediaType })); }
+      catch (error) { results.classList.remove('visible'); downloadButton.disabled = !detectSingleYoutubeType(urlInput.value); toast(error.message); }
+      finally { setPreviewLoading(false); }
+    });
+    downloadButton.addEventListener('click', async () => {
+      const singleType = detectSingleYoutubeType(urlInput.value);
+      if (!previewReady && !singleType) return;
+      if (singleType) { previewIsSingle = true; previewMediaType = singleType; activateMediaType(singleType); }
+      downloadButton.disabled = true;
+      try {
+        const job = await api('/api/download', { url: urlInput.value, media_type: mediaType, crop_ratio: cropRatioInput.value });
+        currentJob = job.id; sessionStorage.setItem('channel-downloader-job', currentJob);
+        renderJobFiles([]); document.querySelector('#job-path').textContent = 'Saving files to your Downloads folder…';
+        const cropLabel = cropRatioInput.value === 'original' ? '' : ` (${cropRatioInput.value} crop)`;
+        const kindLabel = previewMediaType === 'shorts' ? (previewIsSingle ? 'Short' : 'Shorts') : (previewIsSingle ? 'video' : 'videos');
+        document.querySelector('#job-title').textContent = `Downloading ${previewIsSingle ? 'one ' : ''}${kindLabel}${cropLabel}`;
+        cancelJobButton.hidden = false; cancelJobButton.disabled = false; cancelJobButton.textContent = 'Stop download';
+        document.querySelector('#job-card').classList.add('visible');
+        document.querySelector('#job-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        pollJob();
+      } catch (error) { toast(error.message); downloadButton.disabled = false; }
+    });
+    cancelJobButton.addEventListener('click', async () => {
+      if (!currentJob || cancelJobButton.disabled) return;
+      cancelJobButton.disabled = true;
+      cancelJobButton.textContent = 'Stopping…';
+      try { await api(`/api/jobs/${currentJob}/cancel`, {}); pollJob(); }
+      catch (error) { cancelJobButton.disabled = false; cancelJobButton.textContent = 'Stop download'; toast(error.message); }
+    });
+    async function pollJob() {
+      if (!currentJob) return;
+      try {
+        const job = await api(`/api/jobs/${currentJob}`);
+        const done = ['complete', 'complete_with_errors', 'error', 'cancelled'].includes(job.status);
+        document.querySelector('#job-status').textContent = job.status.replaceAll('_', ' ');
+        const indicator = document.querySelector('#status-indicator');
+        indicator.className = `status-indicator ${job.status === 'error' || job.status === 'complete_with_errors' ? 'error' : done ? 'complete' : ''}`;
+        const convertingToMp4 = (job.logs || []).some(line => line.includes('[VideoConvertor] Converting video from') && line.includes('to mp4'));
+        const percent = Math.round(convertingToMp4 ? 100 : (job.progress || 0));
+        document.querySelector('#progress-fill').style.width = `${percent}%`;
+        document.querySelector('#progress-track').setAttribute('aria-valuenow', String(percent));
+        document.querySelector('#job-percent').textContent = `${percent}%`;
+        document.querySelector('#job-current').textContent = job.current ? job.current.split(/[\\/]/).pop() : (done ? 'Finished' : 'Connecting…');
+        document.querySelector('#job-message').textContent = convertingToMp4
+          ? 'The source is downloaded. Cropping and converting to MP4 now; wait for this to finish.'
+          : job.message;
+        document.querySelector('#job-log').textContent = (job.logs || []).join('\n');
+        document.querySelector('#job-log').scrollTop = document.querySelector('#job-log').scrollHeight;
+        if (!done) pollTimer = setTimeout(pollJob, 1100);
+        else {
+          downloadButton.disabled = false; cancelJobButton.hidden = true; cancelJobButton.disabled = false;
+          document.querySelector('#job-path').textContent = 'Select a file below to download it to your device.';
+          try { renderJobFiles((await api(`/api/jobs/${currentJob}/files`)).files); } catch (_) { renderJobFiles([]); }
+          toast(job.message);
+        }
+      } catch (error) {
+        if (error.message === 'Download job not found.') { sessionStorage.removeItem('channel-downloader-job'); currentJob = null; }
+        toast(error.message);
+      }
+    }
+    function setConnectionState(connected) {
+      const badge = document.querySelector('#connection-badge');
+      badge.classList.toggle('connected', connected);
+      badge.classList.toggle('disconnected', !connected);
+      badge.title = connected ? 'Downloader app is connected and running' : 'Downloader app is not reachable';
+    }
+    async function checkDependencies(showErrors = true) {
+      try {
+        const state = await api('/api/status');
+        setConnectionState(true);
+        for (const [id, ready] of [['ytdlp-pill', state.yt_dlp], ['ffmpeg-pill', state.ffmpeg], ['deno-pill', state.deno]]) {
+          const el = document.getElementById(id); el.classList.toggle('ready', ready); el.classList.toggle('missing', !ready);
+        }
+        if (showErrors && (!state.yt_dlp || !state.ffmpeg || !state.deno)) {
+          const parts = []; if (!state.yt_dlp) parts.push('yt-dlp'); if (!state.ffmpeg) parts.push('ffmpeg'); if (!state.deno) parts.push('Deno');
+          setTimeout(() => toast(`Downloader tools are unavailable: ${parts.join(', ')}.`), 600);
+        }
+      } catch (_) { setConnectionState(false); if (showErrors) toast('Could not reach the local app server.'); }
+    }
+    if (currentJob) {
+      document.querySelector('#job-card').classList.add('visible');
+      document.querySelector('#job-path').textContent = 'Restoring the latest download status…';
+      pollJob();
+    }
+    checkDependencies();
+    setInterval(() => checkDependencies(false), 15000);
+  </script>
+</body>
+</html>

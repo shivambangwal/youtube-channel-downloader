@@ -1,0 +1,17 @@
+services:
+  downloader:
+    build: .
+    container_name: channel-downloader
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    user: "10001:10001"
+    environment:
+      YT_DOWNLOADER_HOST: "0.0.0.0"
+      YT_DOWNLOADER_PORT: "8765"
+      YT_DOWNLOADER_USERNAME: ${YT_DOWNLOADER_USERNAME}
+      YT_DOWNLOADER_PASSWORD: ${YT_DOWNLOADER_PASSWORD}
+      YT_DOWNLOADER_ALLOWED_ORIGINS: ${YT_DOWNLOADER_ALLOWED_ORIGINS}
+      YT_DOWNLOADER_PUBLIC_URL: ${YT_DOWNLOADER_PUBLIC_URL}
+    ports:
+      - "127.0.0.1:8765:8765"
