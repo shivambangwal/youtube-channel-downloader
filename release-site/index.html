@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="description" content="Official updates for the local Channel Downloader for macOS.">
+  <title>Channel Downloader Updates</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b0e14; --panel:#131923; --line:#2b3543; --ink:#f3f6fb; --muted:#9aa6b8; --red:#ff292f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; background:radial-gradient(ellipse at 90% 0,#2a171a 0,transparent 38%),var(--bg); color:var(--ink); font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(620px,100%); padding:clamp(24px,6vw,48px); background:linear-gradient(145deg,#171e29,#10151d); border:1px solid var(--line); border-radius:22px; box-shadow:0 24px 80px #0006; }
+    .eyebrow { color:#ff7378; text-transform:uppercase; font-size:11px; font-weight:750; letter-spacing:.16em; }
+    h1 { margin:12px 0 10px; font-size:clamp(32px,7vw,46px); letter-spacing:-.05em; line-height:1.05; }
+    p { color:var(--muted); }
+    .version { display:inline-flex; align-items:center; gap:8px; margin:15px 0 20px; padding:6px 11px; border:1px solid #623137; border-radius:99px; background:#281619; color:#ffdadd; font-size:12px; }
+    .dot { width:7px;height:7px;border-radius:50%;background:#ff3c43;box-shadow:0 0 12px #ff3c4388; }
+    a { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:46px; margin-top:8px; padding:0 18px; border-radius:10px; background:var(--red); color:white; text-decoration:none; font-weight:720; }
+    a:hover { filter:brightness(1.08); }
+    .note { margin-top:24px; padding-top:17px; border-top:1px solid var(--line); font-size:12px; }
+    code { color:#f3c7ca; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">Official release feed</div>
+    <h1>Channel Downloader</h1>
+    <p>Latest local macOS app update. The app’s built-in updater checks the release checksum before installing and keeps your runtime tools and Downloads folder.</p>
+    <div class="version"><i class="dot" aria-hidden="true"></i><span id="version">Loading release…</span></div>
+    <br>
+    <a href="./channel-downloader-macos.zip" download>Download update package <span aria-hidden="true">↓</span></a>
+    <p class="note">For the app updater, open Channel Downloader and choose <strong>Check for updates</strong>. To install manually, replace only <code>app.py</code>, <code>VERSION</code>, <code>README.md</code>, <code>Start Downloader.command</code>, and <code>web/index.html</code>; keep <code>.runtime</code> and <code>downloads</code>.</p>
+  </main>
+  <script>
+    fetch('./latest.json', { cache: 'no-store' }).then(r => r.json()).then(release => {
+      document.querySelector('#version').textContent = `Version ${release.version} · ${release.platform}`;
+    }).catch(() => { document.querySelector('#version').textContent = 'Release information is temporarily unavailable'; });
+  </script>
+</body>
+</html>
