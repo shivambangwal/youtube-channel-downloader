@@ -21,8 +21,8 @@ Use **Check for updates** in the app header to install the latest app files. The
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765) in your browser. Paste a channel URL to preview its Videos or Shorts tab, or paste one YouTube watch, `youtu.be`, or Shorts URL and click **Download selection** directly; previewing a single link is optional. Choose a framing option first if you want a crop. By default, files are saved inside your Mac's `~/Downloads` folder, organized by channel and content type; single links go under `~/Downloads/single-links/`. Cropped files are kept in separate `crop-4x5`, `crop-1x1`, or `crop-5x4` folders. Set `YT_DOWNLOADER_DOWNLOAD_DIR` before launch if you want to use another folder. Cropped videos take longer because FFmpeg re-encodes them. Existing completed files are kept and skipped on later runs. Use **Stop download** in the progress panel to cancel; completed files are kept and partial downloads can resume later.
 
-## Install from the Mac disk image
+## Install the Mac app
 
-Open `channel-downloader-installer.dmg`, drag **Channel Downloader.app** to **Applications**, then open it from Applications. The launcher opens Terminal for the local server and opens the downloader in your browser. Python 3.11 or newer is required. App files and first-run tools are stored under `~/Library/Application Support/Channel Downloader`; downloaded videos remain in `~/Downloads`. The installer is not signed or notarized, so macOS may require Control-clicking the app and choosing **Open** the first time.
+Open `channel-downloader-installer.dmg`, drag **Channel Downloader.app** to **Applications**, then open it from Applications. It opens in its own Mac window; the local download engine runs quietly in the background, with no Terminal window or browser tab. Python 3.11 or newer is required. On first launch, the app installs yt-dlp, FFmpeg, and Deno inside `~/Library/Application Support/Channel Downloader`. Videos are saved in `~/Downloads`. Quit the app to stop its local engine; active downloads are stopped and completed files are kept.
 
-Press `Ctrl+C` in the terminal to stop the local server. If port 8765 is already in use, set `YT_DOWNLOADER_PORT` before starting the app.
+If port 8765 is already in use, quit the other local downloader before opening the Mac app.
