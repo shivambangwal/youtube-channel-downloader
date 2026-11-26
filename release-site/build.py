@@ -61,6 +61,11 @@ def main() -> None:
     }
     (PUBLIC / "latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(SITE / "index.html", PUBLIC / "index.html")
+    installer = SITE / "channel-downloader-installer.dmg"
+    if installer.is_file():
+        shutil.copyfile(installer, PUBLIC / installer.name)
+        manifest["installer_url"] = f"{UPDATE_SITE}/{installer.name}"
+        (PUBLIC / "latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Prepared Channel Downloader {version}: {len(raw_archive)} byte update package")
 
 
