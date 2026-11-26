@@ -18,6 +18,11 @@
     .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 60px; }
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 44px; }
     .brand { display: flex; align-items: center; gap: 11px; font-weight: 650; letter-spacing: -.025em; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .update-button { border: 1px solid #8b252a; color: #fff; background: #35191c; border-radius: 99px; padding: 6px 11px; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .update-button:hover { background: #512126; border-color: #c93239; }
+    .update-button:disabled { opacity: .62; cursor: wait; }
+    .version-label { color: var(--soft); font-size: 10px; }
     .local-badge { border: 1px solid var(--line); color: var(--muted); padding: 6px 10px; border-radius: 99px; font-size: 12px; display: flex; align-items: center; gap: 7px; }
     .local-badge .dot { background: #748094; box-shadow: none; }
     .local-badge.connected { color: #a5f2c4; border-color: #28573d; background: #101b16; }
@@ -123,7 +128,7 @@
     .spinner { width: 15px; height: 15px; border: 2px solid #203018; border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } .side-card { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; } .side-title { grid-column: 1 / -1; } .deps { grid-column: 1 / -1; } .video-grid { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 560px) { .shell { width: calc(100% - 26px); padding-top: 20px; } .topbar { margin-bottom: 32px; } .intro { margin-bottom: 23px; } .form-card, .side-card, .results, .job-card { padding: 18px; } .local-badge { font-size: 10px; } .video-grid { grid-template-columns: repeat(2, 1fr); } .actions { flex-direction: column; } .actions button { width: 100%; } .side-card { display: block; } .spec { padding: 10px 0; } }
+    @media (max-width: 560px) { .shell { width: calc(100% - 26px); padding-top: 20px; } .topbar { margin-bottom: 32px; align-items: flex-start; gap: 12px; } .top-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; } .version-label { display: none; } .update-button { font-size: 10px; padding: 6px 8px; } .intro { margin-bottom: 23px; } .form-card, .side-card, .results, .job-card { padding: 18px; } .local-badge { font-size: 10px; } .video-grid { grid-template-columns: repeat(2, 1fr); } .actions { flex-direction: column; } .actions button { width: 100%; } .side-card { display: block; } .spec { padding: 10px 0; } }
   </style>
 </head>
 <body>
@@ -132,7 +137,11 @@
       <div class="brand">
         <span>Channel Downloader</span>
       </div>
-      <div class="local-badge" id="connection-badge" title="Checking app connection"><i class="dot"></i><span>Private downloader</span></div>
+      <div class="top-actions">
+        <span class="version-label" id="version-label"></span>
+        <button class="update-button" id="update-button" type="button" data-action="check">Check for updates</button>
+        <div class="local-badge" id="connection-badge" title="Checking app connection"><i class="dot"></i><span>Private downloader</span></div>
+      </div>
     </header>
 
     <section class="intro">
@@ -210,6 +219,7 @@
     const cropRatioInput = document.querySelector('#crop-ratio');
     const previewButton = document.querySelector('#preview-button');
     const downloadButton = document.querySelector('#download-button');
+    const updateButton = document.querySelector('#update-button');
     const cancelJobButton = document.querySelector('#cancel-job-button');
     const results = document.querySelector('#results');
     const grid = document.querySelector('#video-grid');
@@ -219,6 +229,7 @@
     let previewMediaType = 'videos';
     let currentJob = sessionStorage.getItem('channel-downloader-job');
     let pollTimer = null;
+    let installedVersion = 'unknown';
 
     function detectSingleYoutubeType(rawUrl) {
       try {
@@ -428,6 +439,8 @@
       try {
         const state = await api('/api/status');
         setConnectionState(true);
+        installedVersion = state.version || 'unknown';
+        document.querySelector('#version-label').textContent = `v${installedVersion}`;
         for (const [id, ready] of [['ytdlp-pill', state.yt_dlp], ['ffmpeg-pill', state.ffmpeg], ['deno-pill', state.deno]]) {
           const el = document.getElementById(id); el.classList.toggle('ready', ready); el.classList.toggle('missing', !ready);
         }
@@ -437,6 +450,49 @@
         }
       } catch (_) { setConnectionState(false); if (showErrors) toast('Could not reach the local app server.'); }
     }
+    updateButton.addEventListener('click', async () => {
+      const action = updateButton.dataset.action;
+      updateButton.disabled = true;
+      try {
+        if (action === 'install') {
+          updateButton.textContent = 'Installing…';
+          const result = await api('/api/update/install', {});
+          if (result.installed) {
+            updateButton.dataset.action = 'restart';
+            updateButton.textContent = 'Restart to finish';
+            updateButton.title = `Installed v${result.version}; restart the app to use it`;
+            toast(result.message);
+          } else {
+            updateButton.dataset.action = 'check';
+            updateButton.textContent = 'Check for updates';
+            toast(result.message);
+          }
+        } else if (action === 'restart') {
+          toast('Quit the Terminal app window, then reopen Start Downloader.command.');
+        } else {
+          updateButton.textContent = 'Checking…';
+          const result = await api('/api/update/check');
+          if (result.update_available) {
+            updateButton.dataset.action = 'install';
+            updateButton.textContent = 'Install update';
+            updateButton.title = `Version ${result.latest_version} is available`;
+            toast(`Update ${result.latest_version} is available.`);
+          } else {
+            updateButton.dataset.action = 'check';
+            updateButton.textContent = 'Check for updates';
+            updateButton.title = `You have the latest version (${installedVersion})`;
+            toast('You have the latest version.');
+          }
+        }
+      } catch (error) {
+        updateButton.dataset.action = 'check';
+        updateButton.textContent = 'Check for updates';
+        updateButton.title = error.message;
+        toast(error.message);
+      } finally {
+        updateButton.disabled = false;
+      }
+    });
     if (currentJob) {
       document.querySelector('#job-card').classList.add('visible');
       document.querySelector('#job-path').textContent = 'Restoring the latest download status…';
