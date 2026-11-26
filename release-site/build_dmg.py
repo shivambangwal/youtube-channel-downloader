@@ -123,8 +123,10 @@ def main() -> None:
         "hdiutil", "create", "-volname", "Channel Downloader",
         "-srcfolder", str(stage), "-ov", "-format", "UDZO", str(OUTPUT),
     ], check=True)
+    shutil.rmtree(stage, ignore_errors=True)
     print(f"Created {OUTPUT} ({OUTPUT.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":
     main()
+
