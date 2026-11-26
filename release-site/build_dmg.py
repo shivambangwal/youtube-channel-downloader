@@ -1,72 +1,24 @@
 #!/usr/bin/env python3
-"""Build a drag-to-Applications macOS disk image for Channel Downloader."""
+"""Build a native macOS app wrapper and drag-to-Applications disk image."""
 
 from __future__ import annotations
 
 import os
 import plistlib
+import platform
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_SOURCE = ROOT / "youtube-channel-downloader"
+MAC_SOURCE = ROOT / "macos-app" / "ChannelDownloaderApp.swift"
 SITE = Path(__file__).resolve().parent
 VERSION = (SITE / "VERSION").read_text(encoding="utf-8").strip()
 APP_NAME = "Channel Downloader.app"
 OUTPUT = SITE / "channel-downloader-installer.dmg"
-APP_FILES = (
-    "app.py",
-    "README.md",
-    "VERSION",
-    "Start Downloader.command",
-    "web/index.html",
-)
-
-
-def launcher_script() -> str:
-    return '''on run
-    set appURL to "http://127.0.0.1:8765/"
-    set bundleRoot to POSIX path of (path to me)
-    set sourcePath to bundleRoot & "Contents/Resources/ChannelDownloader"
-    set supportPath to POSIX path of (path to home folder) & "Library/Application Support/Channel Downloader/App"
-    try
-        do shell script "/usr/bin/curl -fsS --max-time 1 " & quoted form of (appURL & "api/status") & " >/dev/null"
-        open location appURL
-        return
-    end try
-
-    set commandText to "/bin/mkdir -p " & quoted form of supportPath & "; " & ¬
-        "if [ ! -f " & quoted form of (supportPath & "/app.py") & " ]; then /usr/bin/ditto " & quoted form of sourcePath & " " & quoted form of supportPath & "; fi; " & ¬
-        "cd " & quoted form of supportPath & "; " & ¬
-        "python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || { echo 'Python 3.11 or newer is required. Install Python from python.org, then start Channel Downloader again.'; read -r; exit 1; }; " & ¬
-        "python3 app.py"
-    tell application "Terminal"
-        activate
-        do script commandText
-    end tell
-
-    set ready to false
-    with timeout of 300 seconds
-        repeat 240 times
-            try
-                do shell script "/usr/bin/curl -fsS --max-time 1 " & quoted form of (appURL & "api/status") & " >/dev/null"
-                set ready to true
-                exit repeat
-            on error
-                delay 1
-            end try
-        end repeat
-    end timeout
-    if ready then
-        open location appURL
-    else
-        display dialog "Channel Downloader is still starting. Check the Terminal window for its status, then open http://127.0.0.1:8765 in your browser." buttons {"OK"} default button "OK"
-    end if
-end run
-'''
+APP_FILES = ("app.py", "README.md", "VERSION", "Start Downloader.command", "web/index.html")
 
 
 def main() -> None:
@@ -75,53 +27,67 @@ def main() -> None:
     missing = [name for name in APP_FILES if not (APP_SOURCE / name).is_file()]
     if missing:
         raise SystemExit("The local app is missing: " + ", ".join(missing))
-    if shutil.which("osacompile") is None or shutil.which("hdiutil") is None:
-        raise SystemExit("This installer can only be built on macOS with osacompile and hdiutil.")
+    if not MAC_SOURCE.is_file():
+        raise SystemExit(f"The native app source is missing: {MAC_SOURCE}")
+    if shutil.which("swiftc") is None or shutil.which("hdiutil") is None:
+        raise SystemExit("Build the Mac installer on macOS with Swift and hdiutil installed.")
 
     stage = SITE / ".dmg-staging"
     if stage.exists():
         shutil.rmtree(stage)
-    stage.mkdir()
-    app_bundle = stage / APP_NAME
-    script_path = SITE / ".channel-downloader-launcher.applescript"
-    script_path.write_text(launcher_script(), encoding="utf-8")
-    try:
-        subprocess.run(["osacompile", "-o", str(app_bundle), str(script_path)], check=True)
-    finally:
-        script_path.unlink(missing_ok=True)
+    contents = stage / APP_NAME / "Contents"
+    macos = contents / "MacOS"
+    resources = contents / "Resources"
+    source_bundle = resources / "ChannelDownloader"
+    macos.mkdir(parents=True)
+    source_bundle.mkdir(parents=True)
 
-    resources = app_bundle / "Contents/Resources/ChannelDownloader"
-    resources.mkdir(parents=True, exist_ok=True)
+    executable = macos / "ChannelDownloader"
+    arch = platform.machine()
+    if arch not in {"arm64", "x86_64"}:
+        raise SystemExit(f"Unsupported Mac processor architecture: {arch}")
+    subprocess.run([
+        "swiftc", "-O", "-target", f"{arch}-apple-macos12.0",
+        "-framework", "AppKit", "-framework", "WebKit",
+        "-o", str(executable), str(MAC_SOURCE),
+    ], check=True)
+    executable.chmod(0o755)
+
     for relative in APP_FILES:
-        destination = resources / relative
+        destination = source_bundle / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         if relative == "VERSION":
             destination.write_text(VERSION + "\n", encoding="utf-8")
         else:
             shutil.copy2(APP_SOURCE / relative, destination)
-    launcher = resources / "Start Downloader.command"
-    launcher.chmod(0o755)
+    source_bundle.joinpath("Start Downloader.command").chmod(0o755)
 
-    info_path = app_bundle / "Contents/Info.plist"
-    with info_path.open("rb") as info_file:
-        info = plistlib.load(info_file)
-    info.update({
+    info = {
         "CFBundleName": "Channel Downloader",
         "CFBundleDisplayName": "Channel Downloader",
         "CFBundleIdentifier": "com.channel-downloader.mac",
+        "CFBundleExecutable": "ChannelDownloader",
+        "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
         "LSApplicationCategoryType": "public.app-category.video",
-    })
-    with info_path.open("wb") as info_file:
-        plistlib.dump(info, info_file)
+        "NSPrincipalClass": "NSApplication",
+        "NSHighResolutionCapable": True,
+        "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+        "LSMinimumSystemVersion": "12.0",
+    }
+    with (contents / "Info.plist").open("wb") as plist_file:
+        plistlib.dump(info, plist_file)
+    (contents / "PkgInfo").write_text("APPL????", encoding="ascii")
 
     (stage / "Install Instructions.txt").write_text(
         "Install Channel Downloader\n\n"
         "1. Drag Channel Downloader.app onto the Applications shortcut in this window.\n"
-        "2. Open Channel Downloader from Applications.\n"
-        "3. Keep the Terminal window open while using it. The first launch downloads its local video tools.\n\n"
-        "Python 3.11 or newer is required. Your app files and tools are kept in ~/Library/Application Support/Channel Downloader.\n",
+        "2. Open Channel Downloader from Applications. It opens in its own Mac app window.\n"
+        "3. The private download engine and video tools run in the background; no Terminal window or browser tab is needed.\n\n"
+        "Python 3.11 or newer is required. The first run downloads yt-dlp, Deno, and FFmpeg into your user Library.\n"
+        "App files and tools are kept in ~/Library/Application Support/Channel Downloader.\n"
+        "Videos are saved in ~/Downloads. Quitting the app stops an active download.\n",
         encoding="utf-8",
     )
     os.symlink("/Applications", stage / "Applications")
