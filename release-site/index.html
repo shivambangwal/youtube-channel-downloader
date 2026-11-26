@@ -19,7 +19,7 @@
     .dot { width:7px;height:7px;border-radius:50%;background:#ff3c43;box-shadow:0 0 12px #ff3c4388; }
     a { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:46px; margin-top:8px; padding:0 18px; border-radius:10px; background:var(--red); color:white; text-decoration:none; font-weight:720; }
     a:hover { filter:brightness(1.08); }
-    .installer { margin-left:8px; background:#242c38; border:1px solid #475365; }
+    .update-package { margin-left:8px; background:#242c38; border:1px solid #475365; }
     .installer[hidden] { display:none; }
     .installer:hover { background:#303b4a; }
     .note { margin-top:24px; padding-top:17px; border-top:1px solid var(--line); font-size:12px; }
@@ -33,8 +33,8 @@
     <p>Install Channel Downloader as a Mac app. It opens in its own window, with no Terminal window or separate browser tab. The private download engine runs locally and saves videos to Downloads.</p>
     <div class="version"><i class="dot" aria-hidden="true"></i><span id="version">Loading release…</span></div>
     <br>
-    <a href="./channel-downloader-macos.zip" download>Download update package <span aria-hidden="true">↓</span></a>
-    <a class="installer" id="installer-link" href="./channel-downloader-installer.dmg" download hidden>Mac installer (DMG) <span aria-hidden="true">↓</span></a>
+    <a id="installer-link" href="./channel-downloader-installer.dmg" download>Download Mac app (DMG) <span aria-hidden="true">↓</span></a>
+    <a class="update-package" href="./channel-downloader-macos.zip" download>Engine update files (ZIP) <span aria-hidden="true">↓</span></a>
     <p class="note">Drag the DMG’s <strong>Channel Downloader.app</strong> into Applications. Python 3.11 or newer is required; the app installs yt-dlp, FFmpeg, and Deno on first launch and keeps them in your user Library. Existing Downloads are not moved.</p>
   </main>
   <script>
