@@ -108,8 +108,9 @@
     .status-indicator { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
     .status-indicator.error { background: var(--red); }
     .status-indicator.complete { background: var(--blue); }
-    .progress-track { height: 5px; border-radius: 9px; background: #232d3b; margin: 17px 0 9px; overflow: hidden; }
-    .progress-fill { width: 0; height: 100%; background: var(--accent); border-radius: inherit; transition: width .35s ease; }
+    .progress-track { height: 19px; position: relative; border-radius: 9px; background: #232d3b; margin: 17px 0 9px; overflow: hidden; }
+    .progress-fill { width: 0; height: 100%; background: #39d98a; border-radius: inherit; transition: width .35s ease; }
+    .progress-value { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 11px; line-height: 1; font-weight: 750; text-shadow: 0 1px 3px #000b; pointer-events: none; }
     .job-caption { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 14px; }
     .job-message { color: #e1e7ef; font-size: 12px; margin-top: 14px; }
     .job-path { color: var(--soft); font-size: 11px; word-break: break-all; margin-top: 5px; }
@@ -204,7 +205,7 @@
 
     <section class="card job-card" id="job-card">
       <div class="job-head"><div><h2 id="job-title">Download in progress</h2><p class="sub" id="job-sub">Files are saved in your Mac Downloads folder. Download them to your device below.</p></div><button class="secondary cancel-job" id="cancel-job-button" type="button" hidden>Stop download</button><span class="job-status"><i id="status-indicator" class="status-indicator"></i><span id="job-status">Starting</span></span></div>
-      <div class="progress-track" id="progress-track" role="progressbar" aria-label="Current video download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-track" id="progress-track" role="progressbar" aria-label="Current video download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-fill" id="progress-fill"></div><span class="progress-value" id="progress-value">0%</span></div>
       <div class="job-caption"><span id="job-current">Connecting…</span><span id="job-percent">0%</span></div>
       <div class="job-message" id="job-message"></div><div class="job-path" id="job-path"></div>
       <div class="download-files" id="job-files" hidden><h3>Completed files — select a file to save it to your device</h3><div class="file-list" id="job-file-list"></div></div>
@@ -411,6 +412,7 @@
         document.querySelector('#progress-fill').style.width = `${percent}%`;
         document.querySelector('#progress-track').setAttribute('aria-valuenow', String(percent));
         document.querySelector('#job-percent').textContent = `${percent}%`;
+        document.querySelector('#progress-value').textContent = `${percent}%`;
         document.querySelector('#job-current').textContent = job.current ? job.current.split(/[\\/]/).pop() : (done ? 'Finished' : 'Connecting…');
         document.querySelector('#job-message').textContent = convertingToMp4
           ? 'The source is downloaded. Cropping and converting to MP4 now; wait for this to finish.'
