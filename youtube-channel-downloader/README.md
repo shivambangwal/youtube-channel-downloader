@@ -7,7 +7,7 @@ Use it only for videos you own or are authorized to save. Follow YouTube's terms
 
 ## Built-in tools
 
-Python 3.11 or newer is needed to run the app. The app includes local copies of yt-dlp, FFmpeg, and Deno in the hidden `.runtime/` folder. If that folder is missing, the app downloads them there on launch; this needs an internet connection once and does not install tools system-wide or require Homebrew. The FFmpeg binary comes from the platform-specific `imageio-ffmpeg` wheel, and yt-dlp is installed with its default YouTube support dependencies.
+Python 3.11 or newer is needed to run the app. On first launch, it downloads app-local copies of yt-dlp, FFmpeg, and Deno into the hidden `.runtime/` folder; this needs an internet connection once and does not install tools system-wide or require Homebrew. Keep `.runtime/` between app updates. The FFmpeg binary comes from the platform-specific `imageio-ffmpeg` wheel, and yt-dlp is installed with its default YouTube support dependencies.
 
 ## Run
 
@@ -16,6 +16,8 @@ On macOS, double-click `Start Downloader.command` and keep its Terminal window o
 ```sh
 python3 app.py
 ```
+
+Use **Check for updates** in the app header to install the latest app files. The updater verifies the package checksum and preserves `.runtime/` and `downloads/`; restart the app after it installs an update.
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765) in your browser. Paste a channel URL to preview its Videos or Shorts tab, or paste one YouTube watch, `youtu.be`, or Shorts URL and click **Download selection** directly; previewing a single link is optional. Choose a framing option first if you want a crop. By default, files are saved inside your Mac's `~/Downloads` folder, organized by channel and content type; single links go under `~/Downloads/single-links/`. Cropped files are kept in separate `crop-4x5`, `crop-1x1`, or `crop-5x4` folders. Set `YT_DOWNLOADER_DOWNLOAD_DIR` before launch if you want to use another folder. Cropped videos take longer because FFmpeg re-encodes them. Existing completed files are kept and skipped on later runs. Use **Stop download** in the progress panel to cancel; completed files are kept and partial downloads can resume later.
 
