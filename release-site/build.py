@@ -33,7 +33,7 @@ def main() -> None:
         raise SystemExit("The local downloader release is missing one or more required files.")
     version = os.environ.get("VERCEL_GIT_COMMIT_SHA", "").strip()[:12]
     if not version:
-        version = (APP / "VERSION").read_text(encoding="utf-8").strip() or "development"
+        version = (SITE / "VERSION").read_text(encoding="utf-8").strip() or "development"
 
     if PUBLIC.exists():
         shutil.rmtree(PUBLIC)
