@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0b0e14">
-  <meta name="description" content="Official updates for the local Channel Downloader for macOS.">
-  <title>Channel Downloader Updates</title>
+    <meta name="description" content="The native Mac app for Channel Downloader, with official updates and installer downloads.">
+  <title>Channel Downloader for Mac</title>
   <style>
     :root { color-scheme: dark; --bg:#0b0e14; --panel:#131923; --line:#2b3543; --ink:#f3f6fb; --muted:#9aa6b8; --red:#ff292f; }
     * { box-sizing:border-box; }
@@ -30,12 +30,12 @@
   <main>
     <div class="eyebrow">Official release feed</div>
     <h1>Channel Downloader</h1>
-    <p>Latest local macOS app update. The app’s built-in updater checks the release checksum before installing and keeps your runtime tools and Downloads folder.</p>
+    <p>Install Channel Downloader as a Mac app. It opens in its own window, with no Terminal window or separate browser tab. The private download engine runs locally and saves videos to Downloads.</p>
     <div class="version"><i class="dot" aria-hidden="true"></i><span id="version">Loading release…</span></div>
     <br>
     <a href="./channel-downloader-macos.zip" download>Download update package <span aria-hidden="true">↓</span></a>
     <a class="installer" id="installer-link" href="./channel-downloader-installer.dmg" download hidden>Mac installer (DMG) <span aria-hidden="true">↓</span></a>
-    <p class="note">For the app updater, open Channel Downloader and choose <strong>Check for updates</strong>. To install manually, replace only <code>app.py</code>, <code>VERSION</code>, <code>README.md</code>, <code>Start Downloader.command</code>, and <code>web/index.html</code>; keep <code>.runtime</code> and <code>downloads</code>.</p>
+    <p class="note">Drag the DMG’s <strong>Channel Downloader.app</strong> into Applications. Python 3.11 or newer is required; the app installs yt-dlp, FFmpeg, and Deno on first launch and keeps them in your user Library. Existing Downloads are not moved.</p>
   </main>
   <script>
     fetch('./latest.json', { cache: 'no-store' }).then(r => r.json()).then(release => {
