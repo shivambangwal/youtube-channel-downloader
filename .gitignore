@@ -3,6 +3,7 @@ youtube-channel-downloader/.runtime/
 
 # User downloads and local machine metadata.
 youtube-channel-downloader/downloads/
+release-site/public/
 **/.DS_Store
 
 # Python cache and environment files.
