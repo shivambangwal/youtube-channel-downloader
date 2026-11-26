@@ -53,7 +53,7 @@ def main() -> None:
         "product": "Channel Downloader",
         "platform": "macOS",
         "version": version,
-        "release_notes": "Latest Channel Downloader app files. Your .runtime tools and Downloads folder are preserved.",
+        "release_notes": "Native Mac app window; the private download engine runs without a Terminal window or separate browser. Existing tools and Downloads are preserved.",
         "download_url": f"{UPDATE_SITE}/{ARCHIVE_NAME}",
         "sha256": hashlib.sha256(raw_archive).hexdigest(),
         "size": len(raw_archive),
