@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import base64
+import hashlib
 import hmac
 import mimetypes
 import os
@@ -13,10 +14,15 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
+import urllib.error
+import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -28,6 +34,15 @@ DOWNLOADS_DIR = Path(os.environ.get("YT_DOWNLOADER_DOWNLOAD_DIR", str(Path.home(
 RUNTIME_DIR = BASE_DIR / ".runtime"
 HOST = os.environ.get("YT_DOWNLOADER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("YT_DOWNLOADER_PORT", "8765"))
+APP_VERSION_FILE = BASE_DIR / "VERSION"
+try:
+    APP_VERSION = APP_VERSION_FILE.read_text(encoding="utf-8").strip()
+except OSError:
+    APP_VERSION = "unversioned"
+UPDATE_BASE_URL = "https://channel-downloader-updates.vercel.app"
+UPDATE_MANIFEST_URL = f"{UPDATE_BASE_URL}/latest.json"
+UPDATE_FILES = {"app.py", "README.md", "VERSION", "Start Downloader.command", "web/index.html"}
+MAX_UPDATE_BYTES = 64 * 1024 * 1024
 MAX_PREVIEW_ITEMS = 200
 AUTH_USERNAME = os.environ.get("YT_DOWNLOADER_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("YT_DOWNLOADER_PASSWORD", "")
@@ -182,6 +197,107 @@ def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 
     handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(body)
+
+
+def fetch_update_manifest() -> dict:
+    request = urllib.request.Request(
+        UPDATE_MANIFEST_URL,
+        headers={"User-Agent": "ChannelDownloader-Updater/1", "Accept": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if response.status != 200:
+            raise RuntimeError("The update site did not return an available release.")
+        raw = response.read(64 * 1024 + 1)
+    if len(raw) > 64 * 1024:
+        raise RuntimeError("The update information is too large to read safely.")
+    manifest = json.loads(raw.decode("utf-8"))
+    version = manifest.get("version")
+    download_url = manifest.get("download_url")
+    digest = manifest.get("sha256")
+    size = manifest.get("size")
+    if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", version):
+        raise RuntimeError("The update site returned an invalid version.")
+    parsed = urlsplit(download_url if isinstance(download_url, str) else "")
+    if parsed.scheme != "https" or parsed.netloc != urlsplit(UPDATE_BASE_URL).netloc or parsed.path != "/channel-downloader-macos.zip":
+        raise RuntimeError("The update site returned an unexpected download address.")
+    if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+        raise RuntimeError("The update site returned an invalid package checksum.")
+    if not isinstance(size, int) or size < 1 or size > MAX_UPDATE_BYTES:
+        raise RuntimeError("The update package size is invalid.")
+    return manifest
+
+
+def install_latest_update() -> dict:
+    manifest = fetch_update_manifest()
+    version = manifest["version"]
+    if version == APP_VERSION:
+        return {"installed": False, "version": APP_VERSION, "message": "You already have the latest version."}
+    with JOBS_LOCK:
+        active = any(job.get("status") not in {"complete", "complete_with_errors", "error", "cancelled"} for job in JOBS.values())
+    if active:
+        raise RuntimeError("Finish or stop the current download before installing an update.")
+
+    with tempfile.TemporaryDirectory(prefix=".update-stage-", dir=BASE_DIR) as temp_name:
+        temp_dir = Path(temp_name)
+        archive_path = temp_dir / "update.zip"
+        request = urllib.request.Request(manifest["download_url"], headers={"User-Agent": "ChannelDownloader-Updater/1"})
+        digest = hashlib.sha256()
+        total = 0
+        with urllib.request.urlopen(request, timeout=30) as response, archive_path.open("wb") as archive:
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_UPDATE_BYTES:
+                    raise RuntimeError("The update package is larger than the allowed limit.")
+                digest.update(chunk)
+                archive.write(chunk)
+        if total != manifest["size"] or not hmac.compare_digest(digest.hexdigest(), manifest["sha256"]):
+            raise RuntimeError("The update package failed its integrity check. Nothing was installed.")
+
+        stage = temp_dir / "files"
+        stage.mkdir()
+        with zipfile.ZipFile(archive_path) as package:
+            entries = package.infolist()
+            names = [item.filename for item in entries]
+            if len(names) != len(set(names)) or set(names) != UPDATE_FILES:
+                raise RuntimeError("The update package contains unexpected or missing app files.")
+            expanded = 0
+            for item in entries:
+                mode = item.external_attr >> 16
+                if stat.S_ISLNK(mode) or item.is_dir():
+                    raise RuntimeError("The update package contains an unsafe file entry.")
+                expanded += item.file_size
+                if expanded > MAX_UPDATE_BYTES:
+                    raise RuntimeError("The expanded update package is too large.")
+                destination = stage / item.filename
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(package.read(item))
+                if mode:
+                    os.chmod(destination, mode & 0o777)
+
+        backup = temp_dir / "backup"
+        backup.mkdir()
+        replaced: list[str] = []
+        try:
+            for relative in sorted(UPDATE_FILES):
+                current = BASE_DIR / relative
+                staged = stage / relative
+                if current.exists():
+                    saved = backup / relative
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(current, saved)
+                current.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(staged, current)
+                replaced.append(relative)
+        except Exception:
+            for relative in reversed(replaced):
+                current = BASE_DIR / relative
+                saved = backup / relative
+                if saved.exists():
+                    os.replace(saved, current)
+                else:
+                    current.unlink(missing_ok=True)
+            raise
+    return {"installed": True, "version": version, "message": "Update installed. Quit this app and open Start Downloader.command to restart."}
 
 
 def public_job(job: dict) -> dict:
@@ -373,7 +489,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             status = bundled_tool_status()
             status["download_dir"] = str(DOWNLOADS_DIR)
+            status["version"] = APP_VERSION
             json_response(self, status)
+            return
+        if path == "/api/update/check":
+            try:
+                manifest = fetch_update_manifest()
+                json_response(self, {
+                    "current_version": APP_VERSION,
+                    "latest_version": manifest["version"],
+                    "update_available": manifest["version"] != APP_VERSION,
+                    "release_notes": manifest.get("release_notes", ""),
+                })
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+                json_response(self, {"error": f"Could not check for updates: {exc}"}, 502)
             return
         file_route = re.fullmatch(r"/api/jobs/([a-f0-9]+)/files(?:/(.*))?", path)
         if file_route:
@@ -450,6 +579,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.has_local_origin():
                 json_response(self, {"error": "Request origin is not allowed."}, 403)
+                return
+            if path == "/api/update/install":
+                try:
+                    json_response(self, install_latest_update())
+                except RuntimeError as exc:
+                    status = 409 if "current download" in str(exc).lower() else 502
+                    json_response(self, {"error": str(exc)}, status)
+                except (urllib.error.URLError, TimeoutError, OSError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+                    json_response(self, {"error": f"Could not install the update: {exc}"}, 502)
                 return
             if path == "/api/preview":
                 if not bundled_tool_status()["yt_dlp"]:
