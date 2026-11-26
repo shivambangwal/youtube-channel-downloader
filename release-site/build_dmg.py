@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 APP_SOURCE = ROOT / "youtube-channel-downloader"
 MAC_SOURCE = ROOT / "macos-app" / "ChannelDownloaderApp.swift"
+ICON_SOURCE = ROOT / "macos-app" / "MakeAppIcon.swift"
 SITE = Path(__file__).resolve().parent
 VERSION = (SITE / "VERSION").read_text(encoding="utf-8").strip()
 APP_NAME = "Channel Downloader.app"
@@ -29,7 +30,9 @@ def main() -> None:
         raise SystemExit("The local app is missing: " + ", ".join(missing))
     if not MAC_SOURCE.is_file():
         raise SystemExit(f"The native app source is missing: {MAC_SOURCE}")
-    if shutil.which("swiftc") is None or shutil.which("hdiutil") is None:
+    if not ICON_SOURCE.is_file():
+        raise SystemExit(f"The native app icon source is missing: {ICON_SOURCE}")
+    if any(shutil.which(tool) is None for tool in ("swift", "swiftc", "hdiutil", "iconutil", "sips")):
         raise SystemExit("Build the Mac installer on macOS with Swift and hdiutil installed.")
 
     stage = SITE / ".dmg-staging"
@@ -39,8 +42,12 @@ def main() -> None:
     macos = contents / "MacOS"
     resources = contents / "Resources"
     source_bundle = resources / "ChannelDownloader"
+    iconset = SITE / ".ChannelDownloader.iconset"
     macos.mkdir(parents=True)
     source_bundle.mkdir(parents=True)
+    if iconset.exists():
+        shutil.rmtree(iconset)
+    iconset.mkdir(parents=True)
 
     executable = macos / "ChannelDownloader"
     arch = platform.machine()
@@ -52,6 +59,25 @@ def main() -> None:
         "-o", str(executable), str(MAC_SOURCE),
     ], check=True)
     executable.chmod(0o755)
+
+    png_path = SITE / ".ChannelDownloader-icon.png"
+    icon_generator = SITE / ".make-channel-downloader-icon"
+    subprocess.run(["swiftc", "-O", "-o", str(icon_generator), str(ICON_SOURCE)], check=True)
+    subprocess.run([str(icon_generator), str(png_path)], check=True)
+    icon_generator.unlink(missing_ok=True)
+    icon_sizes = (
+        ("icon_16x16.png", 16), ("icon_16x16@2x.png", 32),
+        ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
+        ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256),
+        ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
+        ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
+    )
+    for name, size in icon_sizes:
+        subprocess.run(["sips", "-z", str(size), str(size), str(png_path), "--out", str(iconset / name)], check=True, stdout=subprocess.DEVNULL)
+    png_path.unlink(missing_ok=True)
+    icon_path = resources / "AppIcon.icns"
+    subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(icon_path)], check=True)
+    shutil.rmtree(iconset)
 
     for relative in APP_FILES:
         destination = source_bundle / relative
@@ -68,6 +94,7 @@ def main() -> None:
         "CFBundleIdentifier": "com.channel-downloader.mac",
         "CFBundleExecutable": "ChannelDownloader",
         "CFBundlePackageType": "APPL",
+        "CFBundleIconFile": "AppIcon.icns",
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
         "LSApplicationCategoryType": "public.app-category.video",
