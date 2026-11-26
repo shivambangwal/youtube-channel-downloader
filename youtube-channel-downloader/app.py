@@ -745,7 +745,24 @@ def main() -> None:
     DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"YouTube Channel Downloader is running at http://{HOST}:{PORT}")
-    print("Press Ctrl+C to stop it.")
+
+    def terminate_server(signum, frame) -> None:
+        def shutdown() -> None:
+            with JOBS_LOCK:
+                active_processes = []
+                for job in JOBS.values():
+                    process = job.get("process")
+                    if process and job["status"] not in {"complete", "complete_with_errors", "error", "cancelled"}:
+                        job["status"] = "cancelled"
+                        job["message"] = "App closed; active download cancelled."
+                        active_processes.append(process)
+            for process in active_processes:
+                stop_process_tree(process)
+            server.shutdown()
+
+        threading.Thread(target=shutdown, name="channel-downloader-shutdown", daemon=True).start()
+
+    signal.signal(signal.SIGTERM, terminate_server)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
