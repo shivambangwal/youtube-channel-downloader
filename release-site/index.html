@@ -19,6 +19,9 @@
     .dot { width:7px;height:7px;border-radius:50%;background:#ff3c43;box-shadow:0 0 12px #ff3c4388; }
     a { display:inline-flex; align-items:center; justify-content:center; gap:9px; min-height:46px; margin-top:8px; padding:0 18px; border-radius:10px; background:var(--red); color:white; text-decoration:none; font-weight:720; }
     a:hover { filter:brightness(1.08); }
+    .installer { margin-left:8px; background:#242c38; border:1px solid #475365; }
+    .installer[hidden] { display:none; }
+    .installer:hover { background:#303b4a; }
     .note { margin-top:24px; padding-top:17px; border-top:1px solid var(--line); font-size:12px; }
     code { color:#f3c7ca; }
   </style>
@@ -31,11 +34,17 @@
     <div class="version"><i class="dot" aria-hidden="true"></i><span id="version">Loading release…</span></div>
     <br>
     <a href="./channel-downloader-macos.zip" download>Download update package <span aria-hidden="true">↓</span></a>
+    <a class="installer" id="installer-link" href="./channel-downloader-installer.dmg" download hidden>Mac installer (DMG) <span aria-hidden="true">↓</span></a>
     <p class="note">For the app updater, open Channel Downloader and choose <strong>Check for updates</strong>. To install manually, replace only <code>app.py</code>, <code>VERSION</code>, <code>README.md</code>, <code>Start Downloader.command</code>, and <code>web/index.html</code>; keep <code>.runtime</code> and <code>downloads</code>.</p>
   </main>
   <script>
     fetch('./latest.json', { cache: 'no-store' }).then(r => r.json()).then(release => {
       document.querySelector('#version').textContent = `Version ${release.version} · ${release.platform}`;
+      if (release.installer_url) {
+        const link = document.querySelector('#installer-link');
+        link.href = release.installer_url;
+        link.hidden = false;
+      }
     }).catch(() => { document.querySelector('#version').textContent = 'Release information is temporarily unavailable'; });
   </script>
 </body>
