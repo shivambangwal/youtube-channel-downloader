@@ -23,6 +23,6 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765) in your browser. Paste a cha
 
 ## Install the Mac app
 
-Open `channel-downloader-installer.dmg`, drag **Channel Downloader.app** to **Applications**, then open it from Applications. It opens in its own Mac window; the local download engine runs quietly in the background, with no Terminal window or browser tab. Python 3.11 or newer is required. On first launch, the app installs yt-dlp, FFmpeg, and Deno inside `~/Library/Application Support/Channel Downloader`. Videos are saved in `~/Downloads`. Quit the app to stop its local engine; active downloads are stopped and completed files are kept.
+Open `channel-downloader-installer.dmg`, drag **Channel Downloader.app** to **Applications**, then open it from Applications. It opens in its own Mac window; the local download engine runs quietly in the background, with no Terminal window or browser tab. Use **Edit → Paste** or **⌘V** to paste a link. Use **Channel Downloader → Check for Updates…** or the button in the app header to check for updates. Python 3.11 or newer is required. On first launch, the app installs yt-dlp, FFmpeg, and Deno inside `~/Library/Application Support/Channel Downloader`. Videos are saved in `~/Downloads`. Quit the app to stop its local engine; active downloads are stopped and completed files are kept.
 
 If port 8765 is already in use, quit the other local downloader before opening the Mac app.
