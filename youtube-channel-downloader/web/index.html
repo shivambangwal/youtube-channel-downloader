@@ -228,6 +228,8 @@
     let previewReady = false;
     let previewIsSingle = false;
     let previewMediaType = 'videos';
+    let previewIsHashtag = false;
+    let previewSelectionId = null;
     let currentJob = sessionStorage.getItem('channel-downloader-job');
     let pollTimer = null;
     let installedVersion = 'unknown';
@@ -250,6 +252,18 @@
         return /^[A-Za-z0-9_-]{11}$/.test(id) ? type : null;
       } catch (_) { return null; }
     }
+    function detectHashtagShorts(rawUrl) {
+      try {
+        const value = rawUrl.trim();
+        if (!value) return false;
+        const url = new URL(value.includes('://') ? value : `https://${value}`);
+        const host = url.hostname.toLowerCase().replace(/\.$/, '');
+        const parts = url.pathname.split('/').filter(Boolean);
+        return ['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(host)
+          && parts.length === 3 && parts[0].toLowerCase() === 'hashtag'
+          && parts[1].length > 0 && parts[2].toLowerCase() === 'shorts';
+      } catch (_) { return false; }
+    }
     function activateMediaType(type) {
       mediaType = type;
       document.querySelectorAll('.segment').forEach(button => {
@@ -260,12 +274,16 @@
     }
     urlInput.addEventListener('input', () => {
       const singleType = detectSingleYoutubeType(urlInput.value);
+      const hashtagShorts = detectHashtagShorts(urlInput.value);
       previewReady = false;
+      previewSelectionId = null;
+      previewIsHashtag = false;
       previewIsSingle = Boolean(singleType);
       previewMediaType = singleType || mediaType;
       downloadButton.disabled = !singleType;
       results.classList.remove('visible');
       if (singleType) activateMediaType(singleType);
+      else if (hashtagShorts) activateMediaType('shorts');
     });
 
     function toast(message) {
@@ -322,6 +340,8 @@
       if (!results.classList.contains('visible')) return;
       const base = previewIsSingle
         ? `One ${previewMediaType === 'shorts' ? 'Short' : 'video'} selected. Only this item will download.`
+        : previewIsHashtag
+          ? 'Shorts hashtag ordered by views, highest first.'
         : `Preview of ${previewMediaType === 'shorts' ? 'Shorts' : 'videos'} on this channel`;
       const note = framing === 'original' ? '' : ` · centered ${framing} crop preview`;
       document.querySelector('#results-sub').textContent = `${base}${note}`;
@@ -337,13 +357,18 @@
         if (duration) { const badge = document.createElement('span'); badge.className = 'duration'; badge.textContent = duration; thumb.append(badge); }
         const meta = document.createElement('div'); meta.className = 'video-meta';
         const title = document.createElement('div'); title.className = 'video-title'; title.textContent = video.title; title.title = video.title;
-        const date = document.createElement('div'); date.className = 'video-date'; date.textContent = prettyDate(video.upload_date) || 'YouTube video';
+        const date = document.createElement('div'); date.className = 'video-date';
+        date.textContent = data.sorted_by_views
+          ? (Number.isFinite(video.view_count) ? `${new Intl.NumberFormat().format(video.view_count)} views` : 'View count unavailable')
+          : (prettyDate(video.upload_date) || 'YouTube video');
         meta.append(title, date); card.append(thumb, meta); grid.append(card);
       }
       const kind = data.media_type === 'shorts' ? 'Shorts' : 'videos';
       document.querySelector('#results-title').textContent = data.channel;
       previewIsSingle = Boolean(data.single);
       previewMediaType = data.media_type || mediaType;
+      previewIsHashtag = Boolean(data.sorted_by_views);
+      previewSelectionId = data.selection_id || null;
       if (previewIsSingle) {
         activateMediaType(previewMediaType);
       }
@@ -353,12 +378,16 @@
       downloadButton.disabled = data.count === 0;
       previewReady = data.count > 0;
       if (!data.count) toast(`No ${kind} found on this channel.`);
-      if (data.truncated) toast('Showing the first 200 items. Download includes the full channel tab.');
+      if (data.truncated) toast(data.sorted_by_views
+        ? 'Previewing the first 200. Download includes the full hashtag, highest views first.'
+        : 'Showing the first 200 items. Download includes the full channel tab.');
     }
     document.querySelectorAll('.segment').forEach(button => button.addEventListener('click', () => {
       const singleType = detectSingleYoutubeType(urlInput.value);
-      activateMediaType(singleType || button.dataset.type);
+      const hashtagShorts = detectHashtagShorts(urlInput.value);
+      activateMediaType(singleType || (hashtagShorts ? 'shorts' : button.dataset.type));
       previewReady = false; previewIsSingle = Boolean(singleType); previewMediaType = singleType || mediaType;
+      previewIsHashtag = false; previewSelectionId = null;
       downloadButton.disabled = !singleType;
       results.classList.remove('visible');
     }));
@@ -380,7 +409,10 @@
       if (singleType) { previewIsSingle = true; previewMediaType = singleType; activateMediaType(singleType); }
       downloadButton.disabled = true;
       try {
-        const job = await api('/api/download', { url: urlInput.value, media_type: mediaType, crop_ratio: cropRatioInput.value });
+        const job = await api('/api/download', {
+          url: urlInput.value, media_type: mediaType, crop_ratio: cropRatioInput.value,
+          selection_id: previewIsHashtag ? previewSelectionId : null,
+        });
         currentJob = job.id; sessionStorage.setItem('channel-downloader-job', currentJob);
         renderJobFiles([]); document.querySelector('#job-path').textContent = 'Saving files to your Downloads folder…';
         const cropLabel = cropRatioInput.value === 'original' ? '' : ` (${cropRatioInput.value} crop)`;
