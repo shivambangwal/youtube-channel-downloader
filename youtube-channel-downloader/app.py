@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import urllib.error
 import urllib.request
@@ -59,6 +60,7 @@ CROP_FILTERS = {
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.RLock()
+HASHTAG_SELECTIONS: dict[str, dict] = {}
 
 # Keep third-party tools and packages inside this app folder.
 sys.path.insert(0, str(RUNTIME_DIR))
@@ -125,8 +127,8 @@ def ensure_bundled_tools() -> None:
         raise RuntimeError(f"Could not install the app-local tools ({missing or 'pip failed'}). Check your internet connection and try again.")
 
 
-def resolve_youtube_selection(raw_url: str, media_type: str) -> tuple[str, str, bool, str]:
-    """Resolve a channel tab or one YouTube video/Shorts URL."""
+def resolve_youtube_selection(raw_url: str, media_type: str) -> tuple[str, str, bool, str, bool]:
+    """Resolve a channel tab, Shorts hashtag page, or one video URL."""
     if media_type not in {"videos", "shorts"}:
         raise ValueError("Choose either Videos or Shorts.")
     raw_url = raw_url.strip()
@@ -138,6 +140,13 @@ def resolve_youtube_selection(raw_url: str, media_type: str) -> tuple[str, str, 
     if host not in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}:
         raise ValueError("Use a YouTube channel, video, or Shorts link.")
     parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) == 3 and parts[0].lower() == "hashtag" and parts[2].lower() == "shorts":
+        hashtag = unquote(parts[1]).lstrip("#")
+        if not hashtag or len(hashtag) > 100 or any(ch.isspace() for ch in hashtag):
+            raise ValueError("That Shorts hashtag link is not valid.")
+        safe_tag = re.sub(r"[^A-Za-z0-9._-]+", "_", hashtag).strip("._-") or "hashtag"
+        hashtag_url = f"https://www.youtube.com/hashtag/{quote(hashtag, safe='')}/shorts"
+        return hashtag_url, f"hashtag-{safe_tag}", False, "shorts", True
     video_id = ""
     is_short = False
     is_single_url = False
@@ -156,7 +165,7 @@ def resolve_youtube_selection(raw_url: str, media_type: str) -> tuple[str, str, 
             raise ValueError("That YouTube video link does not contain a valid video ID.")
         resolved_type = "shorts" if is_short else "videos"
         label = f"{'short' if is_short else 'video'}-{video_id}"
-        return f"https://www.youtube.com/watch?v={video_id}", label, True, resolved_type
+        return f"https://www.youtube.com/watch?v={video_id}", label, True, resolved_type, False
     if not parts:
         raise ValueError("That link does not point to a channel.")
     if parts[0].startswith("@"):
@@ -168,7 +177,7 @@ def resolve_youtube_selection(raw_url: str, media_type: str) -> tuple[str, str, 
     else:
         raise ValueError("Use a channel link like youtube.com/@name, or paste one video or Shorts link.")
     label = re.sub(r"[^A-Za-z0-9._@-]+", "_", label).strip("._") or "channel"
-    return f"https://www.youtube.com{root}/{media_type}", label, False, media_type
+    return f"https://www.youtube.com{root}/{media_type}", label, False, media_type, False
 
 
 def crop_filter_for(crop_ratio: str) -> str | None:
@@ -370,10 +379,12 @@ def stop_process_tree(process: subprocess.Popen) -> None:
                 pass
 
 
-def run_download(job_id: str, command: list[str]) -> None:
+def run_download(job_id: str, command: list[str], cleanup_paths: tuple[Path, ...] = ()) -> None:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
         if not job or job["status"] == "cancelled":
+            for cleanup_path in cleanup_paths:
+                cleanup_path.unlink(missing_ok=True)
             return
         job["status"] = "running"
         job["message"] = "Connecting to the channel…"
@@ -424,6 +435,9 @@ def run_download(job_id: str, command: list[str]) -> None:
             if job_id in JOBS:
                 JOBS[job_id]["status"] = "error"
                 JOBS[job_id]["message"] = f"Download failed: {exc}"
+    finally:
+        for cleanup_path in cleanup_paths:
+            cleanup_path.unlink(missing_ok=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -594,16 +608,18 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "The app-local yt-dlp tool is not available. Restart the app to install it."}, 503)
                     return
                 data = self.read_json()
-                tab_url, selection_label, is_single, resolved_media_type = resolve_youtube_selection(
+                tab_url, selection_label, is_single, resolved_media_type, is_hashtag = resolve_youtube_selection(
                     data.get("url", ""), data.get("media_type", "videos"),
                 )
                 command = [*yt_dlp_command(), "--dump-single-json", "--no-warnings"]
                 if is_single:
                     command.append("--no-playlist")
+                elif is_hashtag:
+                    command.append("--flat-playlist")
                 else:
                     command.extend(["--flat-playlist", "--playlist-end", str(MAX_PREVIEW_ITEMS)])
                 command.append(tab_url)
-                result = subprocess.run(command, capture_output=True, text=True, timeout=120, env=bundled_runtime_env())
+                result = subprocess.run(command, capture_output=True, text=True, timeout=300 if is_hashtag else 120, env=bundled_runtime_env())
                 if result.returncode != 0:
                     detail = (result.stderr or result.stdout or "Could not read this channel.").strip()
                     json_response(self, {"error": detail[-1200:]}, 422)
@@ -614,8 +630,43 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "yt-dlp returned an unreadable channel listing."}, 502)
                     return
                 entries = [listing] if is_single and listing.get("id") else (listing.get("entries") or [])
+                selection_id = None
+                ordered_entries = []
+                if is_hashtag:
+                    seen_ids = set()
+                    ranked_entries = []
+                    for entry in entries:
+                        if not entry:
+                            continue
+                        video_id = str(entry.get("id") or "")
+                        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id) or video_id in seen_ids:
+                            continue
+                        seen_ids.add(video_id)
+                        try:
+                            view_count = max(0, int(entry.get("view_count") or 0))
+                        except (TypeError, ValueError):
+                            view_count = 0
+                        ranked_entries.append({**entry, "id": video_id, "view_count": view_count})
+                    entries = sorted(ranked_entries, key=lambda entry: entry["view_count"], reverse=True)
+                    ordered_entries = [{"id": entry["id"], "view_count": entry["view_count"]} for entry in entries]
+                    selection_id = uuid.uuid4().hex if ordered_entries else None
+                    if selection_id:
+                        now = time.time()
+                        with JOBS_LOCK:
+                            for old_id, saved in list(HASHTAG_SELECTIONS.items()):
+                                if now - saved["created_at"] > 4 * 60 * 60:
+                                    HASHTAG_SELECTIONS.pop(old_id, None)
+                            while len(HASHTAG_SELECTIONS) >= 20:
+                                oldest_id = min(HASHTAG_SELECTIONS, key=lambda token: HASHTAG_SELECTIONS[token]["created_at"])
+                                HASHTAG_SELECTIONS.pop(oldest_id, None)
+                            HASHTAG_SELECTIONS[selection_id] = {
+                                "created_at": now,
+                                "channel": selection_label,
+                                "video_ids": [entry["id"] for entry in ordered_entries],
+                            }
+                preview_entries = entries if is_single else entries[:MAX_PREVIEW_ITEMS]
                 videos = []
-                for entry in entries:
+                for entry in preview_entries:
                     if not entry:
                         continue
                     video_id = entry.get("id") or ""
@@ -630,14 +681,21 @@ class Handler(BaseHTTPRequestHandler):
                         "thumbnail": thumbnail,
                         "duration": entry.get("duration"),
                         "upload_date": entry.get("upload_date"),
+                        "view_count": entry.get("view_count"),
                     })
                 json_response(self, {
                     "channel": (listing.get("title") if is_single else listing.get("channel")) or listing.get("uploader") or selection_label,
                     "media_type": resolved_media_type,
                     "single": is_single,
+                    "sorted_by_views": is_hashtag,
+                    "selection_id": selection_id,
                     "count": len(videos),
-                    "total_count": listing.get("playlist_count"),
-                    "truncated": not is_single and len(videos) >= MAX_PREVIEW_ITEMS and (not listing.get("playlist_count") or listing.get("playlist_count") > len(videos)),
+                    "total_count": len(ordered_entries) if is_hashtag else listing.get("playlist_count"),
+                    "truncated": (
+                        len(ordered_entries) > MAX_PREVIEW_ITEMS
+                        if is_hashtag else
+                        not is_single and len(videos) >= MAX_PREVIEW_ITEMS and (not listing.get("playlist_count") or listing.get("playlist_count") > len(videos))
+                    ),
                     "videos": videos,
                 })
                 return
@@ -651,9 +709,21 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "The app-local FFmpeg tool is not available. Restart the app to install it."}, 503)
                     return
                 data = self.read_json()
-                tab_url, selection_label, is_single, media_type = resolve_youtube_selection(
+                tab_url, selection_label, is_single, media_type, is_hashtag = resolve_youtube_selection(
                     data.get("url", ""), data.get("media_type", "videos"),
                 )
+                hashtag_video_ids = []
+                if is_hashtag:
+                    selection_id = data.get("selection_id")
+                    with JOBS_LOCK:
+                        saved_selection = HASHTAG_SELECTIONS.get(selection_id) if isinstance(selection_id, str) else None
+                    if not saved_selection or saved_selection.get("channel") != selection_label or time.time() - saved_selection.get("created_at", 0) > 4 * 60 * 60:
+                        json_response(self, {"error": "Preview this hashtag Shorts page first so the app can rank it by views."}, 409)
+                        return
+                    hashtag_video_ids = saved_selection.get("video_ids") or []
+                    if not hashtag_video_ids:
+                        json_response(self, {"error": "No Shorts were found for this hashtag."}, 422)
+                        return
                 crop_ratio = data.get("crop_ratio", "original")
                 crop_filter = crop_filter_for(crop_ratio)
                 safe_channel = re.sub(r"[^A-Za-z0-9._@-]+", "_", selection_label)
@@ -665,6 +735,7 @@ class Handler(BaseHTTPRequestHandler):
                 if crop_folder:
                     output_dir = output_dir / crop_folder
                 output_dir.mkdir(parents=True, exist_ok=True)
+                job_id = uuid.uuid4().hex[:12]
                 command = [
                     *yt_dlp_command(),
                     "--ignore-errors",
@@ -681,14 +752,25 @@ class Handler(BaseHTTPRequestHandler):
                     ])
                 else:
                     command.extend(["--merge-output-format", "mp4", "--remux-video", "mp4"])
-                command.append("--no-playlist" if is_single else "--yes-playlist")
-                command.extend(["--format", "bv*+ba/b", tab_url])
-                job_id = uuid.uuid4().hex[:12]
+                cleanup_paths: tuple[Path, ...] = ()
+                command.append("--no-playlist" if is_single or is_hashtag else "--yes-playlist")
+                command.extend(["--format", "bv*+ba/b"])
+                if is_hashtag:
+                    batch_file = Path(tempfile.gettempdir()) / f"channel-downloader-{job_id}.txt"
+                    batch_file.write_text(
+                        "\n".join(f"https://www.youtube.com/shorts/{video_id}" for video_id in hashtag_video_ids) + "\n",
+                        encoding="utf-8",
+                    )
+                    cleanup_paths = (batch_file,)
+                    command.extend(["--batch-file", str(batch_file)])
+                else:
+                    command.append(tab_url)
                 job = {
                     "id": job_id,
                     "status": "queued",
                     "media_type": media_type,
                     "single": is_single,
+                    "sorted_by_views": is_hashtag,
                     "crop_ratio": crop_ratio,
                     "channel": selection_label,
                     "output_dir": output_dir,
@@ -699,7 +781,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 with JOBS_LOCK:
                     JOBS[job_id] = job
-                threading.Thread(target=run_download, args=(job_id, command), daemon=True).start()
+                threading.Thread(target=run_download, args=(job_id, command, cleanup_paths), daemon=True).start()
                 json_response(self, {"id": job_id, "output_dir": str(output_dir)}, 202)
                 return
             if path.startswith("/api/jobs/") and path.endswith("/cancel"):
