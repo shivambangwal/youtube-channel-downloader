@@ -64,7 +64,12 @@ def main() -> None:
     installer = SITE / "channel-downloader-installer.dmg"
     if installer.is_file():
         shutil.copyfile(installer, PUBLIC / installer.name)
-        manifest["installer_url"] = f"{UPDATE_SITE}/{installer.name}"
+        versioned_installer_name = f"channel-downloader-macos-{version}.dmg"
+        shutil.copyfile(installer, PUBLIC / versioned_installer_name)
+        installer_bytes = installer.read_bytes()
+        manifest["installer_url"] = f"{UPDATE_SITE}/{versioned_installer_name}"
+        manifest["installer_sha256"] = hashlib.sha256(installer_bytes).hexdigest()
+        manifest["installer_size"] = len(installer_bytes)
         (PUBLIC / "latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Prepared Channel Downloader {version}: {len(raw_archive)} byte update package")
 
