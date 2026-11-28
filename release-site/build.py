@@ -53,7 +53,7 @@ def main() -> None:
         "product": "Channel Downloader",
         "platform": "macOS",
         "version": version,
-        "release_notes": "Adds YouTube Shorts hashtag pages, sorted from highest to lowest view count and downloaded sequentially. Existing tools and Downloads are preserved.",
+        "release_notes": "Adds view-ranked hashtag Shorts downloads and chapter or timestamp trim mode for single videos. Existing tools and Downloads are preserved.",
         "download_url": f"{UPDATE_SITE}/{ARCHIVE_NAME}",
         "sha256": hashlib.sha256(raw_archive).hexdigest(),
         "size": len(raw_archive),
