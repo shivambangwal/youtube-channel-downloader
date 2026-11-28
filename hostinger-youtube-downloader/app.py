@@ -175,6 +175,47 @@ def crop_filter_for(crop_ratio: str) -> str | None:
     return CROP_FILTERS[crop_ratio]
 
 
+def parse_trim_timestamp(value: str) -> int:
+    parts = value.strip().split(":")
+    if not 1 <= len(parts) <= 3 or any(not part.isdigit() for part in parts):
+        raise ValueError(f"Invalid timestamp: {value}")
+    numbers = [int(part) for part in parts]
+    if (len(numbers) == 1 and numbers[0] > 59) or (len(numbers) == 2 and numbers[1] > 59) or (len(numbers) == 3 and (numbers[1] > 59 or numbers[2] > 59)):
+        raise ValueError(f"Invalid timestamp: {value}")
+    total = numbers[0] if len(numbers) == 1 else numbers[0] * 60 + numbers[1] if len(numbers) == 2 else numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+    if total > 172800:
+        raise ValueError("Trim timestamps must be within 48 hours.")
+    return total
+
+
+def format_trim_timestamp(seconds: int) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_trim_ranges(raw_text: str) -> list[tuple[int, int]]:
+    ranges = []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"([0-9:]+)\s*-\s*([0-9:]+)(?:\s*\|.*)?", line)
+        if not match:
+            raise ValueError("Enter one timestamp range per line, such as 0:00 - 1:06 | Intro.")
+        start, end = parse_trim_timestamp(match.group(1)), parse_trim_timestamp(match.group(2))
+        if end <= start:
+            raise ValueError("Each trim range must end after it starts.")
+        ranges.append((start, end))
+        if len(ranges) > 100:
+            raise ValueError("Choose no more than 100 trim ranges at a time.")
+    if not ranges:
+        raise ValueError("Enter at least one timestamp range.")
+    if any(ranges[index][0] < ranges[index - 1][1] for index in range(1, len(ranges))):
+        raise ValueError("Timestamp ranges must be listed in order without overlapping.")
+    return ranges
+
+
 def validate_public_site_url(value: str) -> str:
     """Require a canonical HTTPS origin without a path, query, or credentials."""
     if not value:
@@ -503,6 +544,38 @@ class Handler(BaseHTTPRequestHandler):
             return
         raw_entries = [listing] if is_single and listing.get("id") else (listing.get("entries") or [])
         entries = [entry for entry in raw_entries if entry and entry.get("id")]
+        trim_mode = data.get("trim_mode", "none")
+        if trim_mode not in {"none", "chapters", "timestamps"}:
+            self.send_stream_error("Choose chapters or timestamp ranges for trimming.", 400, job_id)
+            return
+        trim_ranges: list[tuple[int, int, str]] = []
+        if trim_mode != "none":
+            if not is_single or not entries:
+                self.send_stream_error("Trim mode works with one video or Shorts link at a time.", 400, job_id)
+                return
+            if trim_mode == "chapters":
+                chapters = listing.get("chapters") or []
+                for chapter_index, chapter in enumerate(chapters):
+                    try:
+                        start = int(float(chapter.get("start_time", -1)))
+                        next_start = chapters[chapter_index + 1].get("start_time") if chapter_index + 1 < len(chapters) else listing.get("duration")
+                        end = int(float(chapter.get("end_time") if chapter.get("end_time") is not None else next_start if next_start is not None else -1))
+                    except (TypeError, ValueError):
+                        continue
+                    if start >= 0 and end > start:
+                        trim_ranges.append((start, end, str(chapter.get("title") or f"Chapter {len(trim_ranges) + 1}")))
+                if not trim_ranges:
+                    self.send_stream_error("This video has no usable chapters to split.", 422, job_id)
+                    return
+            else:
+                try:
+                    trim_ranges = [
+                        (start, end, f"{format_trim_timestamp(start)}-{format_trim_timestamp(end)}")
+                        for start, end in parse_trim_ranges(data.get("trim_timestamps", ""))
+                    ]
+                except ValueError as exc:
+                    self.send_stream_error(str(exc), 400, job_id)
+                    return
         if is_hashtag:
             ranked_entries = []
             seen_ids: set[str] = set()
@@ -520,9 +593,13 @@ class Handler(BaseHTTPRequestHandler):
         if not entries:
             self.send_stream_error(f"No downloadable {media_type} were found for this selection.", 404, job_id)
             return
+        download_items = (
+            [{"entry": entries[0], "section": section} for section in trim_ranges]
+            if trim_ranges else [{"entry": entry, "section": None} for entry in entries]
+        )
         update_stream_progress(
-            job_id, status="downloading", current_index=0, total=len(entries), percent=0,
-            current="", message=f"Found {len(entries)} items. Preparing the first video…",
+            job_id, status="downloading", current_index=0, total=len(download_items), percent=0,
+            current="", message=f"Found {len(download_items)} items. Preparing the first video…",
         )
 
         archive_label = (listing.get("title") or selection_label) if is_single else selection_label
@@ -552,20 +629,27 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 archive.writestr("README.txt", readme_text)
                 self.wfile.flush()
-                for index, entry in enumerate(entries, start=1):
+                for index, item in enumerate(download_items, start=1):
+                    entry = item["entry"]
+                    section = item["section"]
                     video_id = str(entry.get("id") or "")
-                    if not video_id or video_id in seen_ids:
+                    if not video_id or (not section and video_id in seen_ids):
                         continue
-                    seen_ids.add(video_id)
+                    if not section:
+                        seen_ids.add(video_id)
                     title = str(entry.get("title") or f"video_{index}")
+                    part_title = str(section[2]) if section else ""
                     update_stream_progress(
-                        job_id, status="downloading", current_index=index, total=len(entries),
-                        percent=0, current=title, message=f"Video {index} of {len(entries)}",
+                        job_id, status="downloading", current_index=index, total=len(download_items),
+                        percent=0, current=f"{title} — {part_title}" if part_title else title,
+                        message=f"Part {index} of {len(download_items)}" if section else f"Video {index} of {len(download_items)}",
                     )
                     safe_title = re.sub(r"[\\/\x00-\x1f:]+", "_", title).strip(" .")[:180] or f"video_{index}"
                     safe_id = re.sub(r"[^A-Za-z0-9_-]", "", video_id) or str(index)
                     framing_suffix = {"4:5": " [4x5 crop]", "1:1": " [1x1 crop]", "5:4": " [5x4 crop]"}.get(crop_ratio, "")
-                    member_name = f"{safe_title} [{safe_id}]{framing_suffix}.mp4"
+                    safe_part = re.sub(r"[\\/\x00-\x1f:]+", "_", part_title).strip(" .")[:100]
+                    trim_suffix = f" - {index:02d} {safe_part}" if section else ""
+                    member_name = f"{safe_title} [{safe_id}]{trim_suffix}{framing_suffix}.mp4"
                     video_url = f"https://www.youtube.com/watch?v={quote(video_id)}"
                     command = [
                         *yt_dlp_command(), "--no-playlist", "--no-warnings", "--newline",
@@ -575,6 +659,10 @@ class Handler(BaseHTTPRequestHandler):
                         "--downloader-args", stream_downloader_args(crop_filter),
                         "--output", "-", video_url,
                     ]
+                    if section:
+                        command[command.index(video_url):command.index(video_url)] = [
+                            "--download-sections", f"*{format_trim_timestamp(section[0])}-{format_trim_timestamp(section[1])}",
+                        ]
                     stderr_tail: list[str] = []
                     process = None
                     try:
@@ -599,9 +687,9 @@ class Handler(BaseHTTPRequestHandler):
                                                 job_id,
                                                 percent=min(100, float(match.group(1))),
                                                 current_index=index,
-                                                total=len(entries),
+                                                total=len(download_items),
                                                 current=title,
-                                                message=f"Video {index} of {len(entries)}",
+                                                message=f"Part {index} of {len(download_items)}" if section else f"Video {index} of {len(download_items)}",
                                             )
 
                             stderr_thread = threading.Thread(
@@ -616,13 +704,13 @@ class Handler(BaseHTTPRequestHandler):
                         if return_code != 0:
                             failures.append(f"{title} [{video_id}]: {' '.join(stderr_tail)[-500:] or 'download failed'}")
                             update_stream_progress(
-                                job_id, percent=100, current_index=index, total=len(entries),
-                                current=title, message=f"Video {index} failed; continuing to the next item.",
+                                job_id, percent=100, current_index=index, total=len(download_items),
+                                current=title, message=f"Part {index} failed; continuing." if section else f"Video {index} failed; continuing to the next item.",
                             )
                         else:
                             update_stream_progress(
-                                job_id, percent=100, current_index=index, total=len(entries),
-                                current=title, message=f"Video {index} of {len(entries)} finished.",
+                                job_id, percent=100, current_index=index, total=len(download_items),
+                                current=title, message=f"Part {index} of {len(download_items)} finished." if section else f"Video {index} of {len(download_items)} finished.",
                             )
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         if process and process.poll() is None:
@@ -633,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
                             stop_process_tree(process)
                         failures.append(f"{title} [{video_id}]: {exc}")
                         update_stream_progress(
-                            job_id, percent=100, current_index=index, total=len(entries),
+                            job_id, percent=100, current_index=index, total=len(download_items),
                             current=title, message=f"Video {index} failed; continuing to the next item.",
                         )
                     finally:
@@ -649,8 +737,8 @@ class Handler(BaseHTTPRequestHandler):
             update_stream_progress(
                 job_id,
                 status="complete_with_errors" if failures else "complete",
-                current_index=len(entries),
-                total=len(entries),
+                current_index=len(download_items),
+                total=len(download_items),
                 percent=100,
                 current="Finished",
                 message=(
@@ -750,6 +838,8 @@ class Handler(BaseHTTPRequestHandler):
                     "channel": (listing.get("title") if is_single else listing.get("channel")) or listing.get("uploader") or selection_label,
                     "media_type": resolved_media_type,
                     "single": is_single,
+                    "duration": listing.get("duration") if is_single else None,
+                    "chapters": listing.get("chapters") if is_single else [],
                     "sorted_by_views": is_hashtag,
                     "count": len(videos),
                     "total_count": len(entries) if is_hashtag else listing.get("playlist_count"),
