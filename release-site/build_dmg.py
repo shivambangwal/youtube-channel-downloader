@@ -32,7 +32,7 @@ def main() -> None:
         raise SystemExit(f"The native app source is missing: {MAC_SOURCE}")
     if not ICON_SOURCE.is_file():
         raise SystemExit(f"The native app icon source is missing: {ICON_SOURCE}")
-    if any(shutil.which(tool) is None for tool in ("swift", "swiftc", "hdiutil", "iconutil", "sips")):
+    if any(shutil.which(tool) is None for tool in ("swift", "swiftc", "hdiutil", "iconutil", "sips", "codesign")):
         raise SystemExit("Build the Mac installer on macOS with Swift and hdiutil installed.")
 
     stage = SITE / ".dmg-staging"
@@ -107,6 +107,10 @@ def main() -> None:
         plistlib.dump(info, plist_file)
     (contents / "PkgInfo").write_text("APPL????", encoding="ascii")
 
+    app_bundle = stage / APP_NAME
+    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(app_bundle)], check=True)
+    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app_bundle)], check=True)
+
     (stage / "Install Instructions.txt").write_text(
         "Install Channel Downloader\n\n"
         "1. Drag Channel Downloader.app onto the Applications shortcut in this window.\n"
@@ -114,7 +118,8 @@ def main() -> None:
         "3. The private download engine and video tools run in the background; no Terminal window or browser tab is needed.\n\n"
         "Python 3.11 or newer is required. The first run downloads yt-dlp, Deno, and FFmpeg into your user Library.\n"
         "App files and tools are kept in ~/Library/Application Support/Channel Downloader.\n"
-        "Videos are saved in ~/Downloads. Quitting the app stops an active download.\n",
+        "Videos are saved in ~/Downloads. Quitting the app stops an active download.\n\n"
+        "If macOS blocks the app the first time, Control-click Channel Downloader.app, choose Open, then confirm Open.\n",
         encoding="utf-8",
     )
     os.symlink("/Applications", stage / "Applications")
@@ -129,4 +134,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
