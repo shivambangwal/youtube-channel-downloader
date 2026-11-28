@@ -198,6 +198,53 @@ def crop_postprocessor_args(crop_filter: str) -> str:
     return "VideoConvertor+ffmpeg_o:" + shlex.join(args)
 
 
+def parse_trim_timestamp(value: str) -> int:
+    parts = value.strip().split(":")
+    if not 1 <= len(parts) <= 3 or any(not part.isdigit() for part in parts):
+        raise ValueError(f"Invalid timestamp: {value}")
+    numbers = [int(part) for part in parts]
+    if (len(numbers) == 1 and numbers[0] > 59) or (len(numbers) == 2 and numbers[1] > 59) or (len(numbers) == 3 and (numbers[1] > 59 or numbers[2] > 59)):
+        raise ValueError(f"Invalid timestamp: {value}")
+    if len(numbers) == 1:
+        total = numbers[0]
+    elif len(numbers) == 2:
+        total = numbers[0] * 60 + numbers[1]
+    else:
+        total = numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+    if total > 172800:
+        raise ValueError("Trim timestamps must be within 48 hours.")
+    return total
+
+
+def format_trim_timestamp(seconds: int) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def parse_trim_ranges(raw_text: str) -> list[tuple[int, int]]:
+    ranges = []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"([0-9:]+)\s*-\s*([0-9:]+)(?:\s*\|.*)?", line)
+        if not match:
+            raise ValueError("Enter one timestamp range per line, such as 0:00 - 1:06 | Intro.")
+        start = parse_trim_timestamp(match.group(1))
+        end = parse_trim_timestamp(match.group(2))
+        if end <= start:
+            raise ValueError("Each trim range must end after it starts.")
+        ranges.append((start, end))
+        if len(ranges) > 100:
+            raise ValueError("Choose no more than 100 trim ranges at a time.")
+    if not ranges:
+        raise ValueError("Enter at least one timestamp range.")
+    if any(ranges[index][0] < ranges[index - 1][1] for index in range(1, len(ranges))):
+        raise ValueError("Timestamp ranges must be listed in order without overlapping.")
+    return ranges
+
+
 def json_response(handler: BaseHTTPRequestHandler, payload: dict, status: int = 200) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
@@ -689,6 +736,8 @@ class Handler(BaseHTTPRequestHandler):
                     "single": is_single,
                     "sorted_by_views": is_hashtag,
                     "selection_id": selection_id,
+                    "duration": listing.get("duration") if is_single else None,
+                    "chapters": listing.get("chapters") if is_single else [],
                     "count": len(videos),
                     "total_count": len(ordered_entries) if is_hashtag else listing.get("playlist_count"),
                     "truncated": (
@@ -712,6 +761,26 @@ class Handler(BaseHTTPRequestHandler):
                 tab_url, selection_label, is_single, media_type, is_hashtag = resolve_youtube_selection(
                     data.get("url", ""), data.get("media_type", "videos"),
                 )
+                trim_mode = data.get("trim_mode", "none")
+                if trim_mode not in {"none", "chapters", "timestamps"}:
+                    json_response(self, {"error": "Choose chapters or timestamp ranges for trimming."}, 400)
+                    return
+                trim_ranges: list[tuple[int, int]] = []
+                if trim_mode != "none":
+                    if not is_single:
+                        json_response(self, {"error": "Trim mode works with one video or Shorts link at a time."}, 400)
+                        return
+                    if trim_mode == "chapters":
+                        chapters = data.get("chapters")
+                        if not isinstance(chapters, list) or not chapters:
+                            json_response(self, {"error": "Preview this video first. It has no chapters to split."}, 422)
+                            return
+                    else:
+                        try:
+                            trim_ranges = parse_trim_ranges(str(data.get("trim_timestamps", "")))
+                        except ValueError as exc:
+                            json_response(self, {"error": str(exc)}, 400)
+                            return
                 hashtag_video_ids = []
                 if is_hashtag:
                     selection_id = data.get("selection_id")
@@ -743,7 +812,13 @@ class Handler(BaseHTTPRequestHandler):
                     "--continue",
                     "--newline",
                     "--ffmpeg-location", ffmpeg_path,
-                    "--output", str(output_dir / "%(title).180B [%(id)s].%(ext)s"),
+                    "--output", str(output_dir / (
+                        "%(title).120B [%(id)s] - %(section_number)02d %(section_title).100B.%(ext)s"
+                        if trim_mode == "chapters" else
+                        "%(title).120B [%(id)s] - %(section_start)s-%(section_end)s.%(ext)s"
+                        if trim_mode == "timestamps" else
+                        "%(title).180B [%(id)s].%(ext)s"
+                    )),
                 ]
                 if crop_filter:
                     command.extend([
@@ -755,6 +830,11 @@ class Handler(BaseHTTPRequestHandler):
                 cleanup_paths: tuple[Path, ...] = ()
                 command.append("--no-playlist" if is_single or is_hashtag else "--yes-playlist")
                 command.extend(["--format", "bv*+ba/b"])
+                if trim_mode == "chapters":
+                    command.append("--split-chapters")
+                elif trim_mode == "timestamps":
+                    for start, end in trim_ranges:
+                        command.extend(["--download-sections", f"*{format_trim_timestamp(start)}-{format_trim_timestamp(end)}"])
                 if is_hashtag:
                     batch_file = Path(tempfile.gettempdir()) / f"channel-downloader-{job_id}.txt"
                     batch_file.write_text(
@@ -771,6 +851,7 @@ class Handler(BaseHTTPRequestHandler):
                     "media_type": media_type,
                     "single": is_single,
                     "sorted_by_views": is_hashtag,
+                    "trim_mode": trim_mode,
                     "crop_ratio": crop_ratio,
                     "channel": selection_label,
                     "output_dir": output_dir,
