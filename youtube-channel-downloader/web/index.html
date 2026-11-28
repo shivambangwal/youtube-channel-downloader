@@ -48,6 +48,13 @@
     input[type=url]:focus { border-color: #ff4b4b; box-shadow: 0 0 0 3px #ff1f1f22; }
     input::placeholder { color: #677386; }
     .helper { color: var(--soft); font-size: 12px; margin-top: 8px; }
+    .trim-options[hidden], .trim-timestamps[hidden], .chapter-list[hidden] { display: none; }
+    .trim-options { display: grid; gap: 10px; }
+    .trim-timestamps { width: 100%; min-height: 108px; resize: vertical; color: var(--ink); background: #0c1119; border: 1px solid #303a49; border-radius: 11px; padding: 12px 14px; font: inherit; }
+    .trim-timestamps:focus { outline: none; border-color: #ff4b4b; box-shadow: 0 0 0 3px #ff1f1f22; }
+    .chapter-list { margin-top: 14px; padding: 14px 16px; border: 1px solid #303a49; border-radius: 12px; color: var(--soft); }
+    .chapter-list strong { display: block; margin-bottom: 8px; color: var(--ink); }
+    .chapter-list ul { margin: 0; padding-left: 20px; display: grid; gap: 5px; }
     .crop-control { margin-top: 18px; }
     .crop-select { width: 100%; color: var(--ink); background: #0c1119; border: 1px solid #303a49; border-radius: 11px; padding: 12px 14px; outline: none; }
     .crop-select:focus { border-color: #ff4b4b; box-shadow: 0 0 0 3px #ff1f1f22; }
@@ -170,6 +177,24 @@
             <button class="segment" type="button" data-type="shorts" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none"><path d="M14.8 3.4a3.1 3.1 0 0 1 3.1 5.4l-1.8 1 1.8 1a3.1 3.1 0 1 1-3.1 5.4l-5.6-3.2-1.8 1a3.1 3.1 0 1 1-3.1-5.4l1.8-1-1.8-1a3.1 3.1 0 1 1 3.1-5.4l5.6 3.2 1.8-1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor"/></svg>Shorts</button>
           </div>
 
+
+          <div class="crop-control">
+            <label for="download-mode">Download mode</label>
+            <select class="crop-select" id="download-mode">
+              <option value="selection">Download selection</option>
+              <option value="trim">Download trim videos</option>
+            </select>
+            <div class="helper">Trim mode splits one video or Short into separate MP4 parts.</div>
+          </div>
+          <div class="crop-control trim-options" id="trim-options" hidden>
+            <label for="trim-source">Split parts by</label>
+            <select class="crop-select" id="trim-source">
+              <option value="chapters">YouTube chapters</option>
+              <option value="timestamps">My timestamps</option>
+            </select>
+            <div class="helper" id="trim-help">Preview a single video first. Its chapters will be saved as separate parts.</div>
+            <textarea class="trim-timestamps" id="trim-timestamps" placeholder="0:00 - 1:06 | Intro&#10;1:06 - 1:48 | Next part" hidden></textarea>
+          </div>
           <div class="crop-control">
             <label for="crop-ratio">Video framing</label>
             <select class="crop-select" id="crop-ratio">
@@ -201,6 +226,7 @@
     <section class="card results" id="results">
       <div class="results-head"><div><h2 id="results-title">Channel preview</h2><p class="sub" id="results-sub">Loading videos…</p></div><span class="result-count" id="result-count"></span></div>
       <div class="video-grid" id="video-grid"></div>
+      <div class="chapter-list" id="chapter-list" hidden></div>
     </section>
 
     <section class="card job-card" id="job-card">
@@ -218,6 +244,11 @@
     const form = document.querySelector('#download-form');
     const urlInput = document.querySelector('#channel-url');
     const cropRatioInput = document.querySelector('#crop-ratio');
+    const downloadModeInput = document.querySelector('#download-mode');
+    const trimOptions = document.querySelector('#trim-options');
+    const trimSourceInput = document.querySelector('#trim-source');
+    const trimTimestampsInput = document.querySelector('#trim-timestamps');
+    const trimHelp = document.querySelector('#trim-help');
     const previewButton = document.querySelector('#preview-button');
     const downloadButton = document.querySelector('#download-button');
     const updateButton = document.querySelector('#update-button');
@@ -228,6 +259,7 @@
     let previewReady = false;
     let previewIsSingle = false;
     let previewMediaType = 'videos';
+    let previewChapters = [];
     let previewIsHashtag = false;
     let previewSelectionId = null;
     let currentJob = sessionStorage.getItem('channel-downloader-job');
@@ -264,6 +296,45 @@
           && parts[1].length > 0 && parts[2].toLowerCase() === 'shorts';
       } catch (_) { return false; }
     }
+
+    function refreshDownloadAvailability() {
+      const singleType = detectSingleYoutubeType(urlInput.value);
+      const enabled = downloadModeInput.value === 'trim'
+        ? Boolean(previewReady && singleType && (trimSourceInput.value === 'timestamps'
+          ? trimTimestampsInput.value.trim() : previewChapters.length))
+        : Boolean(previewReady || singleType);
+      downloadButton.disabled = !enabled;
+      downloadButton.textContent = downloadModeInput.value === 'trim' ? 'Download trim videos' : 'Download selection';
+    }
+    function syncTrimControls() {
+      const trimming = downloadModeInput.value === 'trim';
+      trimOptions.hidden = !trimming;
+      trimTimestampsInput.hidden = !trimming || trimSourceInput.value !== 'timestamps';
+      const hasSingle = Boolean(detectSingleYoutubeType(urlInput.value));
+      trimHelp.textContent = !hasSingle
+        ? 'Trim mode works with one video or Shorts link. Paste one link and preview it first.'
+        : trimSourceInput.value === 'chapters'
+          ? (previewReady && !previewChapters.length ? 'No chapters were found. Choose My timestamps to set your own parts.' : 'Preview the video first. Each YouTube chapter will be saved as a separate MP4 part.')
+          : 'Enter one start and end range per line. Example: 0:00 - 1:06 | Intro';
+      refreshDownloadAvailability();
+    }
+    function renderChapters(chapters) {
+      const box = document.querySelector('#chapter-list');
+      box.replaceChildren();
+      if (!Array.isArray(chapters) || !chapters.length) { box.hidden = true; return; }
+      const heading = document.createElement('strong'); heading.textContent = `Video chapters (${chapters.length})`;
+      const list = document.createElement('ul');
+      for (const chapter of chapters) {
+        const item = document.createElement('li');
+        item.textContent = `${durationText(chapter.start_time)} — ${chapter.title || 'Untitled chapter'}`;
+        list.append(item);
+      }
+      box.append(heading, list); box.hidden = false;
+    }
+    downloadModeInput.addEventListener('change', syncTrimControls);
+    trimSourceInput.addEventListener('change', syncTrimControls);
+    trimTimestampsInput.addEventListener('input', refreshDownloadAvailability);
+
     function activateMediaType(type) {
       mediaType = type;
       document.querySelectorAll('.segment').forEach(button => {
@@ -280,10 +351,10 @@
       previewIsHashtag = false;
       previewIsSingle = Boolean(singleType);
       previewMediaType = singleType || mediaType;
-      downloadButton.disabled = !singleType;
       results.classList.remove('visible');
       if (singleType) activateMediaType(singleType);
       else if (hashtagShorts) activateMediaType('shorts');
+      syncTrimControls();
     });
 
     function toast(message) {
@@ -367,6 +438,8 @@
       document.querySelector('#results-title').textContent = data.channel;
       previewIsSingle = Boolean(data.single);
       previewMediaType = data.media_type || mediaType;
+      previewChapters = data.single && Array.isArray(data.chapters) ? data.chapters : [];
+      renderChapters(previewChapters);
       previewIsHashtag = Boolean(data.sorted_by_views);
       previewSelectionId = data.selection_id || null;
       if (previewIsSingle) {
@@ -375,8 +448,8 @@
       document.querySelector('#result-count').textContent = data.single ? '1 item' : `${data.count}${data.truncated ? '+' : ''} items`;
       results.classList.add('visible');
       updatePreviewFraming();
-      downloadButton.disabled = data.count === 0;
       previewReady = data.count > 0;
+      syncTrimControls();
       if (!data.count) toast(`No ${kind} found on this channel.`);
       if (data.truncated) toast(data.sorted_by_views
         ? 'Previewing the first 200. Download includes the full hashtag, highest views first.'
@@ -387,9 +460,10 @@
       const hashtagShorts = detectHashtagShorts(urlInput.value);
       activateMediaType(singleType || (hashtagShorts ? 'shorts' : button.dataset.type));
       previewReady = false; previewIsSingle = Boolean(singleType); previewMediaType = singleType || mediaType;
+      previewChapters = []; renderChapters([]);
       previewIsHashtag = false; previewSelectionId = null;
-      downloadButton.disabled = !singleType;
       results.classList.remove('visible');
+      syncTrimControls();
     }));
     form.addEventListener('submit', async event => {
       event.preventDefault();
@@ -400,11 +474,18 @@
       document.querySelector('#result-count').textContent = '';
       grid.replaceChildren(); setPreviewLoading(true);
       try { renderVideos(await api('/api/preview', { url: urlInput.value, media_type: mediaType })); }
-      catch (error) { results.classList.remove('visible'); downloadButton.disabled = !detectSingleYoutubeType(urlInput.value); toast(error.message); }
+      catch (error) { results.classList.remove('visible'); previewChapters = []; renderChapters([]); syncTrimControls(); toast(error.message); }
       finally { setPreviewLoading(false); }
     });
     downloadButton.addEventListener('click', async () => {
       const singleType = detectSingleYoutubeType(urlInput.value);
+      const trimMode = downloadModeInput.value === 'trim' ? trimSourceInput.value : 'none';
+      if (trimMode !== 'none' && (!previewReady || !singleType)) {
+        toast('Preview one video or Shorts link before trimming it.'); return;
+      }
+      if (trimMode === 'chapters' && !previewChapters.length) {
+        toast('No chapters were found. Choose My timestamps to define the parts.'); return;
+      }
       if (!previewReady && !singleType) return;
       if (singleType) { previewIsSingle = true; previewMediaType = singleType; activateMediaType(singleType); }
       downloadButton.disabled = true;
@@ -412,17 +493,21 @@
         const job = await api('/api/download', {
           url: urlInput.value, media_type: mediaType, crop_ratio: cropRatioInput.value,
           selection_id: previewIsHashtag ? previewSelectionId : null,
+          trim_mode: trimMode, trim_timestamps: trimTimestampsInput.value,
+          chapters: previewChapters.map(chapter => ({ start_time: chapter.start_time, end_time: chapter.end_time, title: chapter.title })),
         });
         currentJob = job.id; sessionStorage.setItem('channel-downloader-job', currentJob);
         renderJobFiles([]); document.querySelector('#job-path').textContent = 'Saving files to your Downloads folder…';
         const cropLabel = cropRatioInput.value === 'original' ? '' : ` (${cropRatioInput.value} crop)`;
         const kindLabel = previewMediaType === 'shorts' ? (previewIsSingle ? 'Short' : 'Shorts') : (previewIsSingle ? 'video' : 'videos');
-        document.querySelector('#job-title').textContent = `Downloading ${previewIsSingle ? 'one ' : ''}${kindLabel}${cropLabel}`;
+        document.querySelector('#job-title').textContent = trimMode !== 'none'
+          ? `Downloading trimmed parts${cropLabel}`
+          : `Downloading ${previewIsSingle ? 'one ' : ''}${kindLabel}${cropLabel}`;
         cancelJobButton.hidden = false; cancelJobButton.disabled = false; cancelJobButton.textContent = 'Stop download';
         document.querySelector('#job-card').classList.add('visible');
         document.querySelector('#job-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         pollJob();
-      } catch (error) { toast(error.message); downloadButton.disabled = false; }
+      } catch (error) { toast(error.message); syncTrimControls(); }
     });
     cancelJobButton.addEventListener('click', async () => {
       if (!currentJob || cancelJobButton.disabled) return;
@@ -532,6 +617,7 @@
       document.querySelector('#job-path').textContent = 'Restoring the latest download status…';
       pollJob();
     }
+    syncTrimControls();
     checkDependencies();
     setInterval(() => checkDependencies(false), 15000);
   </script>
